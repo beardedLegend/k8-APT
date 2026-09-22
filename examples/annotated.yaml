@@ -1,0 +1,124 @@
+# A cluster profile for k8-apt, with every field spelled out.
+#
+#   k8-apt run --config this-file.yaml
+#
+# Nothing here is required: an empty file is a valid profile and every field
+# below shows its default. `k8-apt config --config this-file.yaml` prints the
+# effective result.
+apiVersion: k8-apt.dev/v1
+kind: ClusterProfile
+
+# Which cluster to talk to. Unset uses $KUBECONFIG, then ~/.kube/config, then
+# the in-cluster service account. A relative path resolves against this file's
+# directory, not the working directory (the same goes for log.files). The identity needs cluster-admin: the run
+# creates namespaces, RBAC, CRDs and admission webhooks, and deletes them again.
+kubeconfig: ""
+
+# The username the tool's own requests appear under in the audit log. Unset
+# means "ask the API server at start-up" (a SelfSubjectReview), which is right
+# whatever the authentication method is. Set it only if that call is denied.
+adminUser: ""
+
+# The DNS domain for the labels, annotations, CRD groups and webhook names the
+# run creates. It never has to resolve; it only has to be a domain nothing
+# else on the cluster uses.
+testDomain: audit-test.example.com
+
+# The throw-away namespace is "<namespacePrefix>-<runid>".
+namespacePrefix: audit-test
+
+# The image the test pods run. It must be pullable from the nodes and exist
+# for their architecture. A handful of pods actually start; the rest are made
+# deliberately unschedulable.
+image: busybox:1.36
+
+# How long to wait after the last request before reading the audit log, so the
+# API server has flushed it.
+settle: 5s
+
+# Idle this long before acting, to measure what the cluster logs when nobody
+# is working. Without it the budget figure is only indicative, because the
+# run's own side effects count as background. 10m gives a usable baseline.
+idleSample: 0s
+
+# Where the audit log can be read.
+log:
+  # "ssh" reads it from the control plane nodes; "files" reads local copies,
+  # for checking an exported log offline.
+  type: ssh
+  path: /var/log/kubernetes/audit/audit.log
+  # Empty means: discover the control plane nodes through the API (the nodes
+  # labelled node-role.kubernetes.io/control-plane) and ssh to their internal
+  # addresses. Override for a bastion, a different address or a single node.
+  hosts: []
+  # Used for discovered hosts, which carry no user of their own.
+  sshUser: root
+  # Extra ssh options, e.g. a known-hosts file or a jump host.
+  sshOptions: []
+  #  - -o
+  #  - UserKnownHostsFile=/path/to/known_hosts
+  # Audit logs are normally root-readable only.
+  sudo: true
+  # Only for type: files.
+  files: []
+
+# The log volume the whole cluster may produce. The run extrapolates the
+# measured idle rate to a year and compares. 36.5 GB/year is 100 MB/day.
+budget:
+  gbPerYear: 36.5
+
+# What the audit policy under test is expected to do. The defaults describe
+# policy/baseline.yaml. A cluster running a different policy either adjusts
+# these or reads the differences off the report (the run is only strict with
+# --strict).
+expect:
+  # The groups whose reads and status writes the policy is expected to drop:
+  # the cluster's own components. Add a group per namespace whose operators
+  # you filter, e.g. system:serviceaccounts:ingress-nginx.
+  managedGroups:
+    - system:nodes
+    - system:serviceaccounts:kube-system
+  # The API groups whose */status writes the policy drops for those groups.
+  statusGroups:
+    - core
+    - apps
+    - batch
+    - autoscaling
+    - policy
+    - networking.k8s.io
+    - storage.k8s.io
+    - certificates.k8s.io
+    - apiextensions.k8s.io
+    - apiregistration.k8s.io
+    - admissionregistration.k8s.io
+  # Control plane identities that are not service accounts.
+  systemUsers:
+    - system:kube-controller-manager
+    - system:kube-scheduler
+    - system:apiserver
+
+# Scenarios that only make sense when the cluster runs the component.
+components:
+  # An authenticating proxy that presents its own service account and
+  # impersonates the end user behind it: a VPN gateway, an SSO portal, a
+  # managed-access broker. These scenarios check that the audit log still
+  # names the human behind the proxy — which policies routinely get wrong,
+  # because Kubernetes matches the policy against the proxy's account and not
+  # against the user it impersonates.
+  proxy:
+    enabled: false
+    serviceAccountNamespace: ""
+    serviceAccountName: ""
+    # The end-user identity to impersonate. Unset means a unique,
+    # non-existent test identity. The group has to be one the cluster grants
+    # rights to, or the scenarios only ever see 403s.
+    user: ""
+    groups: []
+  # Calico: the aggregated projectcalico.org API (whose bodies the API server
+  # cannot record) and the crd.projectcalico.org objects behind it.
+  calico:
+    enabled: false
+  # Whether metrics-server is installed. Only affects a description; the
+  # metrics read must be logged either way.
+  metrics:
+    installed: false
