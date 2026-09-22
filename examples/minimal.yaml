@@ -1,0 +1,5 @@
+# The smallest useful profile: a stock cluster whose control plane nodes are
+# reachable over ssh as the user "ubuntu". Everything else keeps its default
+# (see `k8-apt config` for the effective values).
+log:
+  sshUser: ubuntu

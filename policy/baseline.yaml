@@ -1,0 +1,341 @@
+# Baseline Kubernetes audit policy
+#
+# This is the policy the default expectations of k8-apt describe. It aims at
+# the middle ground most clusters need: everything a human or an unprivileged
+# workload does is recorded, security-relevant writes keep their body, secrets
+# and tokens are recorded without their contents, and the constant chatter of
+# the cluster's own components is dropped so the log fits a sane size budget.
+#
+# Give it to the API server with
+#
+#   --audit-policy-file=/etc/kubernetes/audit-policy.yaml
+#   --audit-log-path=/var/log/kubernetes/audit/audit.log
+#
+# and check what it actually does with
+#
+#   k8-apt run --config your-cluster.yaml --strict
+#
+# ORDER MATTERS. The first rule that matches a request decides its level, so
+# the drops come first, then the credential rules (which must outrank the
+# broad write rule below them, or secret bodies end up in the log), then the
+# writes, then the catch-all.
+#
+# TO ADAPT IT: the lists marked "per cluster" below are the ones to edit. Add
+# a group for each namespace whose operators you treat as part of the
+# platform, and keep that list in step with expect.managedGroups in the k8-apt
+# profile, so the tests check the policy you actually run.
+
+apiVersion: audit.k8s.io/v1
+kind: Policy
+
+# RequestReceived doubles the volume and says nothing the completed event does
+# not. Dropping it globally is what makes "one event per request" true.
+omitStages:
+  - RequestReceived
+
+# managedFields is large, machine-generated and never interesting in an audit
+# trail.
+omitManagedFields: true
+
+rules:
+
+  # =========================================================================
+  # 1. Noise. None of this carries security-relevant information, and all of
+  #    it arrives continuously.
+  # =========================================================================
+
+  # Health and liveness endpoints (kubelet probes, load balancer monitors).
+  - level: None
+    nonResourceURLs:
+      - /healthz*
+      - /livez*
+      - /readyz*
+      - /version
+
+  # API discovery by authenticated clients: every client does this on start-up
+  # and after every cache miss.
+  - level: None
+    userGroups: [system:authenticated]
+    nonResourceURLs:
+      - /api
+      - /api/*
+      - /apis
+      - /apis/*
+      - /openapi/*
+
+  # Events are a cluster's own status feed, already replicated to whatever
+  # collects them, and they are written constantly.
+  - level: None
+    resources:
+      - group: ""
+        resources: [events]
+      - group: events.k8s.io
+        resources: [events]
+
+  # Unauthenticated GET / is what most load balancers use as a health check.
+  # Everything else anonymous stays logged (see the catch-all): an anonymous
+  # request to a real endpoint is worth seeing.
+  - level: None
+    userGroups: [system:unauthenticated]
+    verbs: [get]
+    nonResourceURLs: ["/"]
+
+  # Leader election and node heartbeats. Lease create and delete stay logged:
+  # a new lease is a new controller, which is worth knowing about.
+  - level: None
+    users:
+      - system:kube-controller-manager
+      - system:kube-scheduler
+      - system:apiserver
+    verbs: [get, list, watch, update, patch]
+    resources:
+      - group: coordination.k8s.io
+        resources: [leases]
+  - level: None
+    userGroups:
+      - system:nodes
+      - system:serviceaccounts
+    verbs: [get, list, watch, update, patch]
+    resources:
+      - group: coordination.k8s.io
+        resources: [leases]
+
+  # The API server acting on its own behalf: CRD status, aggregated API
+  # registration, service CIDR and endpoint bookkeeping, quota recalculation.
+  # Without this rule those fall through to the write rule below and are
+  # logged at Request with full bodies, which is a large share of the volume.
+  - level: None
+    users: [system:apiserver]
+
+  # Status subresources written by the control plane. A status update is the
+  # cluster describing itself to itself; the spec change that caused it is
+  # logged separately.
+  - level: None
+    users:
+      - system:kube-controller-manager
+      - system:kube-scheduler
+    verbs: [update, patch]
+    resources: &statusResources
+      - group: ""
+        resources: ["*/status"]
+      - group: apps
+        resources: ["*/status"]
+      - group: batch
+        resources: ["*/status"]
+      - group: autoscaling
+        resources: ["*/status"]
+      - group: policy
+        resources: ["*/status"]
+      - group: networking.k8s.io
+        resources: ["*/status"]
+      - group: storage.k8s.io
+        resources: ["*/status"]
+      - group: certificates.k8s.io
+        resources: ["*/status"]
+      - group: apiextensions.k8s.io
+        resources: ["*/status"]
+      - group: apiregistration.k8s.io
+        resources: ["*/status"]
+      - group: admissionregistration.k8s.io
+        resources: ["*/status"]
+      # per cluster: add the groups of the operators you run, e.g.
+      #- group: cert-manager.io
+      #  resources: ["*/status"]
+
+  # The same for the platform's own service accounts.
+  - level: None
+    # per cluster: keep in step with expect.managedGroups in the k8-apt profile
+    userGroups: &managedGroups
+      - system:nodes
+      - system:serviceaccounts:kube-system
+      # Add one entry per namespace whose operators are part of the platform:
+      #- system:serviceaccounts:ingress-nginx
+      #- system:serviceaccounts:cert-manager
+      #- system:serviceaccounts:calico-system
+      #- system:serviceaccounts:tigera-operator
+    verbs: [update, patch]
+    resources: *statusResources
+
+  # Authentication and authorization checks made by components on behalf of
+  # their own callers: high volume, and the request they authorize is logged.
+  - level: None
+    userGroups: *managedGroups
+    verbs: [create]
+    resources:
+      - group: authentication.k8s.io
+        resources: [tokenreviews]
+      - group: authorization.k8s.io
+        resources: [subjectaccessreviews]
+
+  # =========================================================================
+  # 2. Credentials and interactive access, for every user.
+  #
+  #    These rules come BEFORE the write rules on purpose: their bodies
+  #    contain secret data or bearer tokens, so they must never reach a rule
+  #    that would record a body.
+  # =========================================================================
+
+  - level: Metadata
+    resources:
+      - group: ""
+        resources:
+          - secrets
+          - serviceaccounts/token
+      - group: authentication.k8s.io
+        resources: [tokenreviews]
+    # KNOWN LIMITATION: failed authentication is audited at ResponseStarted
+    # only, so omitting that stage hides a 401 against these URIs. Dropping
+    # the next two lines costs one extra event per secret watch and makes
+    # failed authentication against secrets visible. k8-apt reports this as a
+    # gap either way.
+    omitStages:
+      - ResponseStarted
+
+  # Interactive access to a running container or a node. Metadata already
+  # carries who, which pod and — in the request URI — the command.
+  - level: Metadata
+    resources:
+      - group: ""
+        resources:
+          - pods/exec
+          - pods/attach
+          - pods/portforward
+          - pods/proxy
+          - services/proxy
+          - nodes/proxy
+
+  # =========================================================================
+  # 3. An authenticating proxy, if the cluster has one.
+  #
+  #    A proxy authenticates with its own service account and impersonates the
+  #    user behind it. Kubernetes matches the audit policy against the REAL
+  #    user — the proxy's account — so if that account falls into the managed
+  #    groups above, everything the end users do through it is dropped or
+  #    stripped of its body. Naming the proxy here, ABOVE the managed-group
+  #    rules, keeps end-user traffic auditable.
+  #
+  #    per cluster: set the account name, or delete this block.
+  # =========================================================================
+
+  #- level: Metadata
+  #  users: ["system:serviceaccount:<proxy-namespace>:<proxy-account>"]
+  #  verbs: [get, list, watch]
+  #- level: Request
+  #  users: ["system:serviceaccount:<proxy-namespace>:<proxy-account>"]
+  #  verbs: [create, update, patch, delete, deletecollection]
+
+  # =========================================================================
+  # 4. Reads by the cluster's own components.
+  #
+  #    Controllers and kubelets read constantly. Their reads are dropped;
+  #    their writes are not (section 6), and their reads of SECRETS are not
+  #    either, because the secrets rule above already matched.
+  #
+  #    KNOWN LIMITATION: this drops a read before its authorization outcome is
+  #    known, so a DENIED read by one of these accounts — a stolen component
+  #    token probing the API — leaves no trace. Only logging these reads would
+  #    change that, at a large cost in volume.
+  # =========================================================================
+
+  - level: None
+    users:
+      - system:kube-controller-manager
+      - system:kube-scheduler
+    verbs: [get, list, watch]
+  - level: None
+    userGroups: *managedGroups
+    verbs: [get, list, watch]
+
+  # =========================================================================
+  # 5. ConfigMaps.
+  #
+  #    Bodies in the control plane namespace are worth having (kubeadm
+  #    configuration, CoreDNS, controller settings); elsewhere they are bulk
+  #    application data, so the metadata of the change is enough.
+  # =========================================================================
+
+  - level: Request
+    namespaces: [kube-system]
+    verbs: [create, update, patch, delete]
+    resources:
+      - group: ""
+        resources: [configmaps]
+  - level: Metadata
+    verbs: [create, update, patch, delete, deletecollection]
+    resources:
+      - group: ""
+        resources: [configmaps]
+
+  # =========================================================================
+  # 6. Security-relevant writes, by anyone, with their body.
+  #
+  #    This is the heart of the policy: for these objects the audit log has to
+  #    answer "what exactly did they change", not just "they changed
+  #    something".
+  # =========================================================================
+
+  - level: Request
+    verbs: [create, update, patch, delete, deletecollection]
+    resources:
+      # who may do what
+      - group: rbac.authorization.k8s.io
+      - group: certificates.k8s.io
+      - group: ""
+        resources:
+          - serviceaccounts
+          - namespaces
+          - nodes
+          - pods/ephemeralcontainers
+          - persistentvolumes
+          - resourcequotas
+          - limitranges
+      # admission control and API extension
+      - group: admissionregistration.k8s.io
+      - group: apiextensions.k8s.io
+      - group: apiregistration.k8s.io
+      # network isolation
+      - group: networking.k8s.io
+      - group: policy.networking.k8s.io
+      # runtime and scheduling
+      - group: policy
+      - group: node.k8s.io
+      - group: scheduling.k8s.io
+      - group: storage.k8s.io
+      # per cluster: the CRDs of your network plugin or operators, e.g.
+      #- group: projectcalico.org
+      #- group: crd.projectcalico.org
+
+  # =========================================================================
+  # 7. Every other write.
+  #
+  #    Components: metadata is enough, their writes are a consequence of a
+  #    request that was itself logged. Everyone else: full body, because a
+  #    human or a workload changed something and the diff is the evidence.
+  # =========================================================================
+
+  - level: Metadata
+    users:
+      - system:kube-controller-manager
+      - system:kube-scheduler
+    verbs: [create, update, patch, delete, deletecollection]
+  - level: Metadata
+    userGroups: *managedGroups
+    verbs: [create, update, patch, delete, deletecollection]
+  - level: Request
+    verbs: [create, update, patch, delete, deletecollection]
+
+  # =========================================================================
+  # 8. Reads and everything else.
+  # =========================================================================
+
+  # A watch that stays open for hours would otherwise be logged twice, hours
+  # apart. One event, when it ends.
+  - level: Metadata
+    verbs: [watch]
+    omitStages:
+      - ResponseStarted
+
+  # Everything that reached this point: reads by humans and by workloads,
+  # anonymous requests to real endpoints, unknown paths, denied requests of
+  # every kind.
+  - level: Metadata
