@@ -68,16 +68,18 @@ budget:
   gbPerYear: 36.5
 
 # What the audit policy under test is expected to do. The defaults describe
-# policy/baseline.yaml. A cluster running a different policy either adjusts
-# these or reads the differences off the report (the run is only strict with
-# --strict).
+# policy/baseline.yaml, the example policy from the Kubernetes documentation.
+# A cluster running a different policy either adjusts these or reads the
+# differences off the report (the run is only strict with --strict).
 expect:
   # The groups whose reads and status writes the policy is expected to drop:
-  # the cluster's own components. Add a group per namespace whose operators
-  # you filter, e.g. system:serviceaccounts:ingress-nginx.
-  managedGroups:
-    - system:nodes
-    - system:serviceaccounts:kube-system
+  # the cluster's own components. The baseline (the Kubernetes documentation
+  # example) drops nothing by group, hence empty. With policy/hardened.yaml,
+  # list its managed groups here, e.g.
+  #   - system:nodes
+  #   - system:serviceaccounts:kube-system
+  #   - system:serviceaccounts:ingress-nginx
+  managedGroups: []
   # The API groups whose */status writes the policy drops for those groups.
   statusGroups:
     - core
