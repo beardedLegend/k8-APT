@@ -585,17 +585,6 @@ func FmtCounts(m map[string]int, limit int) string {
 	return strings.Join(parts, ", ")
 }
 
-// Truncate shortens s to n runes, with an ellipsis.
-func Truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n <= 1 {
-		return s[:n]
-	}
-	return s[:n-1] + "\u2026"
-}
-
 // ShortUser trims the long service account prefix for compact display.
 func ShortUser(u string) string {
 	if u == "" {

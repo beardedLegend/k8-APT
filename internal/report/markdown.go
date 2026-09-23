@@ -7,6 +7,7 @@ import (
 
 	"github.com/beardedLegend/k8-apt/internal/audit"
 	"github.com/beardedLegend/k8-apt/internal/budget"
+	"github.com/beardedLegend/k8-apt/internal/compliance"
 	"github.com/beardedLegend/k8-apt/internal/scenarios"
 )
 
@@ -79,6 +80,9 @@ func Markdown(env *audit.Env, events []*audit.Event, results []*audit.Result, bu
 		if r.Expect.Gap != "" {
 			p("  - gap: %s\n", r.Expect.Gap)
 		}
+		if ctl := compliance.ForRequirement(r.Expect.Requirement); ctl != "" && st != "SKIP" {
+			p("  - controls: %s\n", ctl)
+		}
 		if r.Skipped != "" {
 			p("  - %s\n", r.Skipped)
 		}
@@ -87,7 +91,29 @@ func Markdown(env *audit.Env, events []*audit.Event, results []*audit.Result, bu
 		p("none\n")
 	}
 
-	p("\n## What the log contained during the run\n\n")
+	p("\n## Compliance controls\n\n")
+	p("What this run is evidence for, per framework. `MET` means every expectation behind the control passed; it says the audit policy records what the control needs, not that the control is certified. `ELSEWHERE` controls cannot be shown by an audit log at all, and the column *also needs* lists what an auditor will ask for besides the log.\n\n")
+	as := compliance.Assess(results)
+	for _, fw := range compliance.Frameworks {
+		p("### %s\n\n| Control | Status | Evidence from this run | Also needs |\n|---|---|---|---|\n", fw.Name)
+		for _, a := range as {
+			if a.Framework != fw {
+				continue
+			}
+			var ev []string
+			for _, req := range a.Reqs {
+				ev = append(ev, strings.SplitN(req, " ", 2)[0])
+			}
+			evidence := strings.Join(ev, ", ")
+			if len(a.Findings) > 0 {
+				evidence += " (" + strings.Join(a.Findings, "; ") + ")"
+			}
+			p("| %s %s | %s | %s | %s |\n", a.ID, a.Title, a.Status, evidence, a.Beyond)
+		}
+		p("\n")
+	}
+
+	p("## What the log contained during the run\n\n")
 	levels := map[string]int{}
 	users := map[string]int{}
 	hosts := map[string]int{}

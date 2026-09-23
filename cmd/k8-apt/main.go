@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/beardedLegend/k8-apt/internal/compliance"
 	"github.com/beardedLegend/k8-apt/internal/config"
 	"github.com/beardedLegend/k8-apt/internal/policygen"
 	"github.com/beardedLegend/k8-apt/internal/report"
@@ -223,6 +224,16 @@ type jsonResult struct {
 	BudgetGBYr  float64       `json:"budgetGBPerYear"`
 	BudgetClean bool          `json:"budgetSampleClean"`
 	Findings    []jsonFinding `json:"findings"`
+	Controls    []jsonControl `json:"controls"`
+}
+
+type jsonControl struct {
+	Framework string   `json:"framework"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Status    string   `json:"status"`
+	Findings  []string `json:"findings,omitempty"`
+	AlsoNeeds string   `json:"alsoNeeds,omitempty"`
 }
 
 type jsonFinding struct {
@@ -232,6 +243,7 @@ type jsonFinding struct {
 	Description string   `json:"description"`
 	Errors      []string `json:"errors,omitempty"`
 	Gap         string   `json:"gap,omitempty"`
+	Controls    string   `json:"controls,omitempty"`
 	Skipped     string   `json:"skipped,omitempty"`
 }
 
@@ -262,7 +274,14 @@ func printJSON(res *runner.Result, opt runner.Options, started time.Time) error 
 			Description: r.Expect.Desc,
 			Errors:      r.Errors,
 			Gap:         r.Expect.Gap,
+			Controls:    compliance.ForRequirement(r.Expect.Requirement),
 			Skipped:     r.Skipped,
+		})
+	}
+	for _, a := range compliance.Assess(res.Results) {
+		out.Controls = append(out.Controls, jsonControl{
+			Framework: a.Framework.Name, ID: a.ID, Title: a.Title, Status: a.Status,
+			Findings: a.Findings, AlsoNeeds: a.Beyond,
 		})
 	}
 	enc := json.NewEncoder(os.Stdout)

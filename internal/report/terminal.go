@@ -7,9 +7,13 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/term"
 
 	"github.com/beardedLegend/k8-apt/internal/audit"
 	"github.com/beardedLegend/k8-apt/internal/budget"
+	"github.com/beardedLegend/k8-apt/internal/compliance"
 	"github.com/beardedLegend/k8-apt/internal/scenarios"
 )
 
@@ -82,7 +86,9 @@ func Terminal(env *audit.Env, events []*audit.Event, results []*audit.Result, b 
 	w("%s%s│%s %s%-*s%s %s│%s\n", c.bold, c.cyan, c.reset, c.bold, width-2, title, c.reset, c.cyan+c.bold, c.reset)
 	w("%s%s│%s %s%-*s%s %s│%s\n", c.bold, c.cyan, c.reset, c.dim, width-2, sub, c.reset, c.cyan+c.bold, c.reset)
 	src := fmt.Sprintf("%d events · %s", len(events), env.Logs.Describe())
-	w("%s%s│%s %s%-*s%s %s│%s\n", c.bold, c.cyan, c.reset, c.dim, width-2, audit.Truncate(src, width-2), c.reset, c.cyan+c.bold, c.reset)
+	for _, l := range wrap(src, width-2) {
+		w("%s%s│%s %s%-*s%s %s│%s\n", c.bold, c.cyan, c.reset, c.dim, width-2, l, c.reset, c.cyan+c.bold, c.reset)
+	}
 	w("%s%s╰%s╯%s\n\n", c.bold, c.cyan, line, c.reset)
 
 	// ---- coverage table -------------------------------------------------
@@ -129,9 +135,6 @@ func Terminal(env *audit.Env, events []*audit.Event, results []*audit.Result, b 
 			reqW = len(req)
 		}
 	}
-	if reqW > 48 {
-		reqW = 48
-	}
 
 	w("%s  COVERAGE BY REQUIREMENT%s\n", c.bold, c.reset)
 	header := fmt.Sprintf("  %-*s  %4s %4s %4s %4s %4s", reqW, "requirement", "pass", "fail", "diff", "gap", "skip")
@@ -150,7 +153,7 @@ func Terminal(env *audit.Env, events []*audit.Event, results []*audit.Result, b 
 			return fmt.Sprintf("%s%4d%s", hot, n, c.reset)
 		}
 		w("  %s%-*s%s  %s %s %s %s %s  %s%s%s\n",
-			col, reqW, audit.Truncate(req, reqW), c.reset,
+			col, reqW, req, c.reset,
 			num(rc.pass, c.green), num(rc.fail, c.red), num(rc.diff, c.blue), num(rc.gap, c.yellow), num(rc.skip, c.gray),
 			col, glyph, c.reset)
 	}
@@ -174,6 +177,7 @@ func Terminal(env *audit.Env, events []*audit.Event, results []*audit.Result, b 
 	printFindingGroup(&sb, c, c.blue, "≠ DIFFERS FROM THE BASELINE POLICY (--strict fails on these)", diffs, 2)
 	printFindingGroup(&sb, c, c.yellow, "⚠ KNOWN GAPS (documented limitations, non-fatal)", gaps, 2)
 	printFindingGroup(&sb, c, c.gray, "○ SKIPPED (scenario could not run)", skips, 1)
+	w("%s", complianceSection(c, compliance.Assess(results)))
 
 	// ---- log composition ------------------------------------------------
 	levels := map[string]int{}
@@ -248,6 +252,12 @@ func printFindingGroup(b *strings.Builder, c palette, col, heading string, rs []
 		return
 	}
 	fmt.Fprintf(b, "%s%s  %s (%d)%s\n", c.bold, col, heading, len(rs), c.reset)
+	tw := termWidth()
+	detail := func(s string) {
+		for _, l := range wrap(s, tw-6) {
+			fmt.Fprintf(b, "      %s%s%s\n", c.dim, l, c.reset)
+		}
+	}
 	for _, r := range rs {
 		fmt.Fprintf(b, "  %s•%s %s%s%s  %s\n", col, c.reset, c.bold, r.Scenario, c.reset, r.Expect.Desc)
 		shown := 0
@@ -256,14 +266,75 @@ func printFindingGroup(b *strings.Builder, c palette, col, heading string, rs []
 				fmt.Fprintf(b, "      %s… %d more%s\n", c.dim, len(r.Errors)-shown, c.reset)
 				break
 			}
-			fmt.Fprintf(b, "      %s%s%s\n", c.dim, audit.Truncate(e, 96), c.reset)
+			detail(e)
 			shown++
 		}
 		if r.Skipped != "" {
-			fmt.Fprintf(b, "      %s%s%s\n", c.dim, audit.Truncate(r.Skipped, 96), c.reset)
+			detail(r.Skipped)
+		} else if ctl := compliance.ForRequirement(r.Expect.Requirement); ctl != "" {
+			detail("↳ " + ctl)
 		}
 	}
 	fmt.Fprint(b, "\n")
+}
+
+// complianceSection summarises every framework control and lists the ones
+// that are not simply met: failing, gapped, differing, untested, and those
+// whose evidence lies outside the audit log.
+func complianceSection(c palette, as []compliance.Assessment) string {
+	var s strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&s, format, args...) }
+	sym := map[string]string{
+		compliance.Fail: "✗", compliance.Gap: "⚠", compliance.Diff: "≠",
+		compliance.NotTested: "○", compliance.Met: "✓", compliance.Elsewhere: "◌",
+	}
+	col := map[string]string{
+		compliance.Fail: c.red, compliance.Gap: c.yellow, compliance.Diff: c.blue,
+		compliance.NotTested: c.gray, compliance.Met: c.green, compliance.Elsewhere: c.gray,
+	}
+	statuses := []string{compliance.Met, compliance.Fail, compliance.Gap, compliance.Diff, compliance.NotTested, compliance.Elsewhere}
+	tw := termWidth()
+
+	w("%s  COMPLIANCE CONTROLS%s  %s✓ met ✗ failing ⚠ known gap ≠ differs ○ untested ◌ evidence outside the audit log%s\n", c.bold, c.reset, c.dim, c.reset)
+	for _, fw := range compliance.Frameworks {
+		var mine []compliance.Assessment
+		n := map[string]int{}
+		for _, a := range as {
+			if a.Framework == fw {
+				mine = append(mine, a)
+				n[a.Status]++
+			}
+		}
+		w("  %s%-12s%s", c.bold, fw.Short, c.reset)
+		for _, st := range statuses {
+			hot := col[st]
+			if n[st] == 0 {
+				hot = c.dim
+			}
+			w("  %s%s %2d%s", hot, sym[st], n[st], c.reset)
+		}
+		w("\n")
+		for _, a := range compliance.ByStatus(mine) {
+			if a.Status == compliance.Met {
+				continue
+			}
+			why := strings.Join(a.Findings, ", ")
+			if a.Status == compliance.Elsewhere {
+				why = "needs " + a.Beyond
+			} else if a.Status == compliance.NotTested {
+				why = "no expectation behind it ran"
+			}
+			for i, l := range wrap(fmt.Sprintf("%s %s — %s", a.ID, a.Title, why), tw-6) {
+				if i == 0 {
+					w("    %s%s%s %s\n", col[a.Status], sym[a.Status], c.reset, l)
+				} else {
+					w("      %s\n", l)
+				}
+			}
+		}
+	}
+	w("  %sthe audit policy is evidence for these controls, not certification of them; see the markdown report for every control%s\n\n", c.dim, c.reset)
+	return s.String()
 }
 
 // levelBar renders "Metadata 161 ▏███████░░░  Request 92 ▏████░░" style counts.
@@ -323,7 +394,7 @@ func budgetSection(b *budget.Budget, c palette) string {
 			}
 			parts = append(parts, fmt.Sprintf("%s %s", budget.MB(b.BytesPerDay(kv.Count))+"/d", kv.Key))
 		}
-		w("%s\n", audit.Truncate(strings.Join(parts, " · "), 200))
+		w("%s\n", strings.Join(wrap(strings.Join(parts, " · "), termWidth()-11), "\n           "))
 	}
 	if !b.Clean {
 		w("  %sbaseline is the run itself (%s), reactions to the run count as idle; --idle-sample 10m gives a clean figure%s\n", c.dim, b.Sample.Round(time.Second), c.reset)
@@ -332,4 +403,48 @@ func budgetSection(b *budget.Budget, c palette) string {
 	}
 	w("\n")
 	return s.String()
+}
+
+// termWidth is the width of the terminal on stdout, or 0 when stdout is not a
+// terminal (pipes and files get unwrapped lines).
+func termWidth() int {
+	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 0
+	}
+	return w
+}
+
+// wrap breaks s into lines of at most width runes, at spaces where possible.
+// Nothing is dropped; words longer than width are split. A width below 20
+// (unknown or absurdly narrow terminal) returns s unwrapped.
+func wrap(s string, width int) []string {
+	if width < 20 || utf8.RuneCountInString(s) <= width {
+		return []string{s}
+	}
+	var lines []string
+	var cur []rune
+	for _, word := range strings.Fields(s) {
+		wr := []rune(word)
+		if len(cur) > 0 && len(cur)+1+len(wr) > width {
+			lines = append(lines, string(cur))
+			cur = cur[:0]
+		}
+		for len(wr) > width {
+			if len(cur) > 0 {
+				lines = append(lines, string(cur))
+				cur = cur[:0]
+			}
+			lines = append(lines, string(wr[:width]))
+			wr = wr[width:]
+		}
+		if len(cur) > 0 {
+			cur = append(cur, ' ')
+		}
+		cur = append(cur, wr...)
+	}
+	if len(cur) > 0 {
+		lines = append(lines, string(cur))
+	}
+	return lines
 }
