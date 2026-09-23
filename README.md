@@ -289,6 +289,28 @@ set `expect.managedGroups` to the groups it drops.
 | Operators and add-ons, detected automatically and skipped when absent: cert-manager, Prometheus Operator, Argo CD, Flux, Kyverno, Gatekeeper, External Secrets, Sealed Secrets, Velero, Istio, Cilium, Gateway API, Traefik, CSI snapshots | `operator-*`, `policy-engine-*`, `service-mesh-istio`, `cni-cilium`, `gateway-api`, `ingress-traefik`, `storage-snapshots` |
 | Log volume against the yearly budget | global `log-budget` |
 
+## Compliance controls
+
+Every requirement is mapped onto the controls it is evidence for in ISO/IEC
+27001:2022 Annex A, SOC 2, PCI DSS v4.0 (requirement 10 and 8.3.2), NIST SP
+800-53 Rev. 5, the CIS Kubernetes Benchmark and BSI IT-Grundschutz (at module
+level). Each failure, difference and known gap in the report names the
+controls it affects, and a controls section rates every control:
+
+* `MET`: every expectation behind it passed.
+* `FAIL` / `GAP` / `DIFF`: one of its requirements has failures, known gaps
+  or differences from the baseline, listed per requirement.
+* `UNTESTED`: none of the expectations behind it ran.
+* `ELSEWHERE`: an audit log cannot show it at all, for example retention, log
+  integrity, time synchronisation, log review, or the pipeline logging its
+  own restarts. The report says what an auditor will ask for instead.
+
+The terminal shows what is not met. The markdown report and `--json` list
+every control, along with what each still needs beyond the log. A `MET`
+control means the audit policy records what the control needs. It does not
+certify the control. The mapping is in `internal/compliance`, and its test
+checks that every requirement maps to at least one control.
+
 ## Things worth knowing about audit logs
 
 Findings from running this against real clusters, useful when reading a log or
@@ -376,6 +398,7 @@ internal/scenarios what the run does and what it then expects (core.go, edge.go,
 internal/budget    log volume measurement
 internal/auditpolicy  the audit policy model: parse, first-match evaluation, render, splice
 internal/policygen    the policy generator: derive, simulate, keep or reject
+internal/compliance   requirements mapped onto ISO 27001, SOC 2, PCI DSS, NIST, CIS, BSI controls
 internal/report    terminal and markdown reports
 internal/runner    act → fetch → verify → report
 internal/config    the cluster profile
