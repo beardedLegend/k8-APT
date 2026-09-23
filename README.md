@@ -101,6 +101,9 @@ its own traffic can always be told apart from the cluster's.
 | `--json` | machine-readable results, for CI |
 | `--color` | `auto`, `always` or `never` |
 | `--quiet` | no progress output |
+| `--generate-policy` | write an audit policy that fixes the run's findings to this file (see below) |
+| `--policy` | the audit policy the cluster runs, which `--generate-policy` extends (default `policy/baseline.yaml`) |
+| `--fix` | which findings `--generate-policy` acts on: any of `fail`, `diff`, `gap` (default all three) |
 
 The exit code is non-zero when the run fails (see *Result semantics*).
 
@@ -113,7 +116,8 @@ subtest and a failure names the scenario and the check that broke:
 K8APT_CONFIG=cluster.yaml K8APT_STRICT=1 go test -count=1 -timeout 30m -v ./...
 ```
 
-`K8APT_IDLE`, `K8APT_REPORT` and `K8APT_EVENTS` mirror the flags above. The
+`K8APT_IDLE`, `K8APT_REPORT`, `K8APT_EVENTS`, `K8APT_GENERATE_POLICY` and
+`K8APT_POLICY` mirror the flags above. The
 unit tests (`go test ./internal/...`) need no cluster at all.
 
 ## Configuring
@@ -133,10 +137,8 @@ log:
 budget:
   gbPerYear: 36.5
 expect:
-  managedGroups:                     # groups the policy treats as platform
-    - system:nodes
-    - system:serviceaccounts:kube-system
-    - system:serviceaccounts:ingress-nginx
+  managedGroups: []                  # groups whose chatter your policy drops;
+                                     # none for the baseline, see policy/hardened.yaml
 components:
   proxy:                             # a VPN gateway, SSO portal, access broker
     enabled: true
@@ -157,35 +159,110 @@ Expectations come in two tiers, because "what the policy should do" is partly
 a matter of taste and partly not:
 
 * **Invariant** — true of any audit policy worth running: secret values and
-  issued tokens never appear in the log, bodies never carry `managedFields`.
-  A failure is a real finding whatever policy you run, and always fails the
-  run.
+  issued tokens never appear in the log. A failure is a real finding whatever
+  policy you run, and always fails the run.
 * **Baseline** — true of [`policy/baseline.yaml`](policy/baseline.yaml), the
-  policy shipped here. On a cluster running a different policy a failure may
+  example policy from the Kubernetes documentation. On a cluster running a different policy a failure may
   simply be a deliberate difference, so it is reported as `DIFF` and only
   fails the run under `--strict`.
 
 Alongside those:
 
-* **GAP** — a documented limitation of the baseline policy, reported but never
-  fatal. When the policy changes so the expectation passes, it flips to "gap
+* **GAP** — something a security review would want that the baseline policy
+  does not record (a body for an RBAC change) or does not drop (component
+  chatter), reported but never fatal. When the policy changes so the expectation passes, it flips to "gap
   closed", which is how you notice you fixed one.
 * **SKIP** — the scenario could not run on this cluster (no in-cluster signer
-  for client certificates, for instance).
+  for client certificates, or an operator that is not installed).
 
 So: **start without `--strict`**, read the `DIFF` list as "here is how your
 policy differs from the baseline", decide which differences you meant, encode
 those in the profile's `expect:` section — then turn on `--strict` in CI and
 keep it green.
 
+## Generating a policy from the findings
+
+```sh
+k8-apt run --config cluster.yaml --idle-sample 10m \
+  --policy /etc/kubernetes/audit-policy.yaml --generate-policy fixed.yaml
+```
+
+writes the policy the cluster runs with the rules that close the run's
+findings placed ahead of its own, comments and all:
+
+```yaml
+rules:
+  # ==== Added by k8-apt from run t2k9xq (2026-09-23) ====
+  # ... together they fix 41 of 57 findings and break no passing check.
+
+  # fixes 14 finding(s):
+  #   rbac-lifecycle: clusterrolebinding create
+  #   incident-privilege-escalation: cluster-admin self-grant ... logged with body
+  #   ... and 12 more
+  - level: Request
+    verbs: ["create"]
+    resources:
+      - group: "rbac.authorization.k8s.io"
+        resources: ["roles", "roles/*", "rolebindings", "clusterrolebindings", ...]
+
+  # ---- the original rules follow, unchanged ----
+```
+
+How it decides:
+
+* **One candidate rule per finding**, taken from what the failed check
+  selects, then generalised: the run's namespace, object names and own
+  identity are dropped, and a service account the run created stands for
+  `system:serviceaccounts`. The rule describes a kind of request, never this
+  run's objects.
+* **Every candidate is simulated before it is kept.** Each event of the run
+  that the rule matches is given the rule's level (bodies removed, or marked
+  as predicted when the log never had them), every check of the run is
+  re-verified, and the rule is kept only if it fixes a finding and turns no
+  passing check into a finding. The cluster's own policy does not need to be
+  known for this: an event the new rules do not match keeps the level it was
+  actually logged at.
+* **Rules that would break something are rejected**, and the report says
+  which check each would break — typically a drop of component reads that
+  would also hide a stolen component token's denied reads. That trade-off is
+  yours to make, by hand.
+* **Credentials stay protected.** Whenever a new rule could match secrets,
+  token requests or token reviews, a `Metadata` rule for those goes first.
+* **Traffic the policy drops cannot be simulated**: it is not in the log. A
+  rule for it is written marked `UNVERIFIED` if it cannot collide with another
+  generated rule, and left open with the collision named if it can.
+* **Some findings are not the policy's to fix** — a response code, an
+  authorization annotation, the recorded identity. They are listed with the
+  reason.
+
+The report also gives the idle log volume before and after, from the same
+simulation, so the cost of the new rules is known before they are deployed.
+Point the API server at the result on a test cluster first and run k8-apt
+again: the simulation predicts from one run's traffic, the next run checks.
+
 ## The baseline policy
 
-[`policy/baseline.yaml`](policy/baseline.yaml) is the policy the default
-expectations describe, and a reasonable starting point in its own right:
-human and workload activity logged, security-relevant writes with their body,
-credentials without their contents, component chatter dropped. It is
-commented throughout, including its two known limitations, and marks the lists
-you need to adapt to your cluster.
+[`policy/baseline.yaml`](policy/baseline.yaml) is the
+[example policy from the Kubernetes documentation](https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/#audit-policy),
+unchanged, and the default expectations describe what it does:
+
+* pods (not their subresources) at `RequestResponse`, `pods/log` and
+  `pods/status` at `Metadata`;
+* ConfigMaps in `kube-system` at `Request` for every verb, other ConfigMaps
+  and all Secrets at `Metadata`;
+* everything else in the core group — nodes, namespaces, services, service
+  accounts, TokenRequests, events, exec and port-forward — at `Request`;
+* every other API group — apps, RBAC, admission, CRDs, operators — at
+  `Metadata`;
+* authenticated discovery (`/api*`, `/version`), the `controller-leader`
+  ConfigMap and kube-proxy's watches dropped; nothing else.
+
+It keeps credentials out of the log, which is why a run against it has no
+failures. Its gaps are two: writes outside the core group have no body, so
+the log says *that* a ClusterRoleBinding, a webhook or a Deployment changed
+but not *how*; and nothing drops component chatter, so the log volume is
+high. [`policy/hardened.yaml`](policy/hardened.yaml) closes both — with it,
+set `expect.managedGroups` to the groups it drops.
 
 ## What it covers
 
@@ -205,6 +282,11 @@ you need to adapt to your cluster.
 | Hygiene: no `RequestReceived`, no `managedFields`, no bodies on secrets, tokens or token reviews, no leaked values | global expectations, `no-credential-leak` |
 | An authenticating proxy: reads, writes, exec and secrets by the end user behind it | `authproxy-*` |
 | Simulated incidents: privilege escalation, RBAC self-grant, secret exfiltration, rogue node, container breakout, lateral movement into the control plane namespace, admission-webhook tampering, mass deletion | `incident-*`, `mass-deletion` |
+| Helm: install, upgrade, history, rollback and uninstall (secret and ConfigMap drivers), hooks and test pods, aggregated ClusterRoles | `helm-*`, `clusterrole-aggregation` |
+| ConfigMaps and Secrets as charts produce them: immutable, binaryData, large, `envFrom` and projected volumes, `kube-root-ca.crt`, well-known `kube-system` and `kube-public` configs, TLS, dockerconfigjson, basic-auth and ssh-auth secrets, image pull secrets | `configmap-patterns`, `configmap-well-known-reads`, `secret-types` |
+| Admission and API server configuration: Pod Security enforce and audit annotations, ValidatingAdmissionPolicy in Audit mode, APIService registration, API Priority and Fairness, CSI drivers, IngressClasses and ingress annotations, hand-written Endpoints and EndpointSlices | `pod-security-admission`, `validating-admission-policy-audit`, `apiservice-registration`, `flowcontrol-apf`, `storage-csidriver`, `ingress-and-endpoints` |
+| Day-2 kubectl: rollout restart, set image, cordon, `kubectl cp` | `kubectl-day2-operations` |
+| Operators and add-ons, detected automatically and skipped when absent: cert-manager, Prometheus Operator, Argo CD, Flux, Kyverno, Gatekeeper, External Secrets, Sealed Secrets, Velero, Istio, Cilium, Gateway API, Traefik, CSI snapshots | `operator-*`, `policy-engine-*`, `service-mesh-istio`, `cni-cilium`, `gateway-api`, `ingress-traefik`, `storage-snapshots` |
 | Log volume against the yearly budget | global `log-budget` |
 
 ## Things worth knowing about audit logs
@@ -243,15 +325,25 @@ writing detection rules:
   request, so `Request` level yields events that look like `Metadata`. The
   aggregated server needs its own audit policy.
 * **Long-running reads produce two events** (`ResponseStarted` and
-  `ResponseComplete`); watches produce one. Anonymous `HEAD /` and `OPTIONS /`
+  `ResponseComplete`), watches included, unless a rule omits
+  `ResponseStarted` for them. Anonymous `HEAD /` and `OPTIONS /`
   are logged under the lowercased HTTP method as the verb, so a load-balancer
   probe drop written for `get` will not match them.
 * **Pods created through `generateName`** have no `objectRef.name`; correlate
   through the owning ReplicaSet.
+* **Admission leaves its verdict in the audit event.** Pod Security in `audit`
+  mode adds `pod-security.kubernetes.io/audit-violations`, a
+  ValidatingAdmissionPolicy bound with `validationActions: [Audit]` adds
+  `validation.policy.admission.k8s.io/validation_failure` — and neither
+  appears anywhere else. A policy that drops those requests loses the
+  verdict with them.
+* **A Helm release is a Secret (or a ConfigMap) holding the chart values.**
+  With `HELM_DRIVER=configmap` in `kube-system`, a policy that logs
+  `kube-system` ConfigMaps at `Request` — the documentation example does —
+  writes every value of the chart, passwords included, into the log.
 * **Deleting a namespace is loud.** The namespace controller sweeps every
-  resource type in it — around 45 `deletecollection` calls in a second — and
-  a dozen of them land at `Request` level, because a rule that keeps bodies
-  for RBAC and networking outranks the rule that quietens platform accounts.
+  resource type in it — around 45 `deletecollection` calls in a second, by
+  the namespace controller, at whatever level the policy gives each resource.
   Worth knowing before you conclude that a controller went rogue.
 
 ## Log volume
@@ -271,19 +363,25 @@ indicative only and never fails the run.
 
 For scale, on a small cluster (7 nodes, Calico, cert-manager, ingress): an
 unfiltered `level: Metadata` policy produced 127 MB/day (46 GB/year); a policy
-of this shape produced 3–5 MB/day (1.2–1.8 GB/year).
+of the shape of `policy/hardened.yaml` produced 3–5 MB/day (1.2–1.8 GB/year).
+The baseline drops even less than the unfiltered policy and logs pods at
+`RequestResponse`, so expect it above the default budget on a busy cluster.
 
 ## How it is put together
 
 ```
 cmd/k8-apt         the binary
 internal/audit     event model, matchers, expectations, verification, log sources
-internal/scenarios what the run does and what it then expects (core.go, edge.go)
+internal/scenarios what the run does and what it then expects (core.go, edge.go, ecosystem.go)
 internal/budget    log volume measurement
+internal/auditpolicy  the audit policy model: parse, first-match evaluation, render, splice
+internal/policygen    the policy generator: derive, simulate, keep or reject
 internal/report    terminal and markdown reports
 internal/runner    act → fetch → verify → report
 internal/config    the cluster profile
-policy/baseline.yaml   the policy the default expectations describe
+policy/baseline.yaml   the policy the default expectations describe (Kubernetes docs example)
+policy/hardened.yaml   a stricter policy that closes the baseline's gaps
+policy/policy.go       embeds the baseline into the binary
 ```
 
 A scenario has two halves, and they run at different times: every `Act` runs
@@ -317,7 +415,17 @@ read-only, so read this once before pointing it at production:
   (a ClusterRoleBinding to a principal that does not exist, an admission
   webhook pointing at an unreachable URL with `failurePolicy: Ignore`).
 * It does create real load for a minute or so, and it writes to `kube-system`
-  (a ConfigMap, a ServiceAccount, an unschedulable pod, a secret — all deleted).
+  (two ConfigMaps, a ServiceAccount, an unschedulable pod, a secret — all
+  deleted).
+* The ecosystem scenarios also create and delete a second namespace (for Pod
+  Security), a ValidatingAdmissionPolicy in `Audit` mode bound to the test
+  namespace only, a FlowSchema matching a user that does not exist, an
+  IngressClass and a CSIDriver nothing implements, and a pair of aggregating
+  ClusterRoles of its own.
+* Anything that would make an operator or the API server act — operator
+  custom resources, an APIService, a node cordon — is sent as a dry-run:
+  audited like the real request, never persisted. cert-manager is the one
+  exception: it issues a self-signed certificate into the test namespace.
 
 ## Licence
 
