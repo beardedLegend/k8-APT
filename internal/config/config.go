@@ -103,7 +103,9 @@ type Budget struct {
 // --no-strict and reads the differences off the report).
 type Expect struct {
 	// ManagedGroups are the user groups whose reads and status writes the
-	// policy is expected to drop: the cluster's own components.
+	// policy is expected to drop: the cluster's own components. The baseline
+	// drops nothing by group, so the default is empty; set it when the
+	// cluster runs policy/hardened.yaml or a policy like it.
 	ManagedGroups []string `json:"managedGroups,omitempty"`
 
 	// StatusGroups are the API groups whose */status writes the policy is
@@ -202,10 +204,6 @@ func Default() *Cluster {
 		},
 		Budget: Budget{GBPerYear: 36.5},
 		Expect: Expect{
-			ManagedGroups: []string{
-				"system:nodes",
-				"system:serviceaccounts:kube-system",
-			},
 			StatusGroups: []string{
 				"core", "apps", "batch", "autoscaling", "policy",
 				"networking.k8s.io", "storage.k8s.io", "certificates.k8s.io",

@@ -43,7 +43,7 @@ func TestPartialProfileKeepsDefaults(t *testing.T) {
 	if c.Image != Default().Image {
 		t.Errorf("an unset field lost its default: image = %q", c.Image)
 	}
-	if len(c.Expect.ManagedGroups) == 0 {
+	if len(c.Expect.StatusGroups) == 0 {
 		t.Error("an unset list lost its default")
 	}
 }

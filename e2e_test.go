@@ -13,6 +13,8 @@
 //	K8APT_IDLE      idle this long first, to measure background log volume
 //	K8APT_REPORT    write the markdown report here
 //	K8APT_EVENTS    write every audit event of the run here (JSON lines)
+//	K8APT_GENERATE_POLICY  write a policy that fixes the findings here
+//	K8APT_POLICY    the policy the cluster runs, for K8APT_GENERATE_POLICY
 package k8apt
 
 import (
@@ -24,6 +26,7 @@ import (
 
 	"github.com/beardedLegend/k8-apt/internal/audit"
 	"github.com/beardedLegend/k8-apt/internal/config"
+	"github.com/beardedLegend/k8-apt/internal/policygen"
 	"github.com/beardedLegend/k8-apt/internal/runner"
 )
 
@@ -78,6 +81,26 @@ func TestAuditPolicy(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 	runner.Report(res)
+
+	if out := os.Getenv("K8APT_GENERATE_POLICY"); out != "" {
+		var current []byte
+		if p := os.Getenv("K8APT_POLICY"); p != "" {
+			if current, err = os.ReadFile(p); err != nil {
+				t.Fatalf("K8APT_POLICY: %v", err)
+			}
+		}
+		plan, err := policygen.Generate(policygen.Input{
+			Env: res.Env, Events: res.Events, Results: res.Results,
+			FetchedAt: res.FetchedAt, Scenarios: res.Scenarios, Strict: os.Getenv("K8APT_STRICT") == "1",
+		}, policygen.Options{Policy: current, Fix: []string{"fail", "diff", "gap"}})
+		if err != nil {
+			t.Fatalf("generate a policy: %v", err)
+		}
+		if err := os.WriteFile(out, plan.Output, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Log(plan.Summary(out))
+	}
 }
 
 func subtestName(r *audit.Result) string {

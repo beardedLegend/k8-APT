@@ -46,6 +46,10 @@ type Result struct {
 	// could not run at all.
 	ActErrors map[string]string
 	Skipped   map[string]string
+	// FetchedAt is when the log was read and Scenarios how many scenarios
+	// ran: the inputs of the budget, kept so it can be recomputed.
+	FetchedAt time.Time
+	Scenarios int
 }
 
 // Counts summarises the results.
@@ -129,6 +133,7 @@ func Run(ctx context.Context, cfg *config.Cluster, opt Options) (*Result, error)
 		return nil, fmt.Errorf("fetch the audit log: %w", err)
 	}
 	fetchedAt := time.Now()
+	res.FetchedAt, res.Scenarios = fetchedAt, len(run)
 	window := env.Start.Add(-2 * time.Minute)
 	for _, e := range fetched {
 		if e.RequestReceived.After(window) {
@@ -173,8 +178,9 @@ func Run(ctx context.Context, cfg *config.Cluster, opt Options) (*Result, error)
 			record(audit.Verify("global", ex, res.Events, env.UserAgent, opt.Strict))
 		}
 	}
-	record(credentialLeakCheck(env, res.Events, opt.Strict))
-	record(managedFieldsCheck(res.Events, opt.Strict))
+	for _, r := range scenarios.LogChecks(env, res.Events, opt.Strict) {
+		record(r)
+	}
 
 	res.Budget = budget.Compute(env, res.Events, fetchedAt, len(run))
 	record(&audit.Result{
@@ -215,48 +221,6 @@ func filter(all []scenarios.Scenario, only []string) []scenarios.Scenario {
 		}
 	}
 	return out
-}
-
-// credentialLeakCheck scans every event for the secret values and tokens the
-// run created. This holds for any audit policy, so it is an invariant.
-func credentialLeakCheck(env *audit.Env, events []*audit.Event, strict bool) *audit.Result {
-	r := &audit.Result{
-		Scenario: "global",
-		Expect: audit.Expect{
-			Desc:        "secret values and issued tokens never appear in the log",
-			Requirement: scenarios.ReqHygiene,
-			Tier:        audit.Invariant,
-		},
-		Strict: strict,
-	}
-	for what, value := range env.Markers() {
-		for _, e := range events {
-			if strings.Contains(e.Raw, value) {
-				r.Errors = append(r.Errors, fmt.Sprintf("%s leaked: %s", what, e.Short()))
-				r.Events = append(r.Events, e)
-			}
-		}
-	}
-	return r
-}
-
-func managedFieldsCheck(events []*audit.Event, strict bool) *audit.Result {
-	r := &audit.Result{
-		Scenario: "global",
-		Expect: audit.Expect{
-			Desc:        "bodies never contain managedFields",
-			Requirement: scenarios.ReqHygiene,
-			Tier:        audit.Invariant,
-		},
-		Strict: strict,
-	}
-	for _, e := range events {
-		if strings.Contains(string(e.RequestObject), `"managedFields"`) ||
-			strings.Contains(string(e.ResponseObject), `"managedFields"`) {
-			r.Errors = append(r.Errors, "managedFields in "+e.Short())
-		}
-	}
-	return r
 }
 
 // cleanup removes everything a run may have left behind. Objects the

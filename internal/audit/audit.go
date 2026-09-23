@@ -35,6 +35,10 @@ type Event struct {
 	Annotations      map[string]string `json:"annotations"`
 	Raw              string            `json:"-"`
 	Host             string            `json:"-"`
+	// PredictedBody marks an event of a policy simulation whose request body
+	// the policy would record but the log never did: the body is a
+	// placeholder, so checks of its content are taken as satisfied.
+	PredictedBody bool `json:"-"`
 }
 
 type UserInfo struct {
@@ -339,6 +343,7 @@ type Expect struct {
 	Code                    int               // expected HTTP status, 0 = don't care
 	Annotations             map[string]string // expected annotations
 	AnnotationsAbsent       []string          // annotation keys that must not be present
+	AnnotationsPresent      []string          // annotation keys that must be present, whatever their value
 	Impersonated            string            // expected impersonatedUser.username
 	ImpersonatedUID         string            // expected impersonatedUser.uid
 	ImpersonatedGroups      []string          // each must appear in impersonatedUser.groups
@@ -449,7 +454,7 @@ func Verify(scn string, ex Expect, events []*Event, runUA string, strict bool) *
 		stages[e.Stage] = true
 		if e.Stage == "ResponseComplete" {
 			for _, s := range ex.SomeRequestBodyContains {
-				if strings.Contains(string(e.RequestObject), s) {
+				if e.PredictedBody || strings.Contains(string(e.RequestObject), s) {
 					someContains[s] = true
 				}
 			}
@@ -472,7 +477,7 @@ func Verify(scn string, ex Expect, events []*Event, runUA string, strict bool) *
 		if ex.ResponseBody == Forbidden && len(e.ResponseObject) > 0 {
 			fail("responseObject present but must be absent: %s", e.Short())
 		}
-		if e.Stage == "ResponseComplete" {
+		if e.Stage == "ResponseComplete" && !e.PredictedBody {
 			body := string(e.RequestObject)
 			for _, s := range ex.RequestBodyContains {
 				if !strings.Contains(body, s) {
@@ -488,6 +493,11 @@ func Verify(scn string, ex Expect, events []*Event, runUA string, strict bool) *
 		for k, v := range ex.Annotations {
 			if e.Annotations[k] != v {
 				fail("annotation %s=%q, want %q: %s", k, e.Annotations[k], v, e.Short())
+			}
+		}
+		for _, k := range ex.AnnotationsPresent {
+			if _, ok := e.Annotations[k]; !ok {
+				fail("annotation %s missing: %s", k, e.Short())
 			}
 		}
 		for _, k := range ex.AnnotationsAbsent {

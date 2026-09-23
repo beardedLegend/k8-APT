@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/beardedLegend/k8-apt/internal/config"
+	"github.com/beardedLegend/k8-apt/internal/policygen"
 	"github.com/beardedLegend/k8-apt/internal/report"
 	"github.com/beardedLegend/k8-apt/internal/runner"
 )
@@ -105,6 +106,9 @@ func runCmd(ctx context.Context, args []string) error {
 		jsonOut    = fs.Bool("json", false, "print the results as JSON instead of the terminal report")
 		color      = fs.String("color", "auto", "colorise the terminal report: auto, always or never")
 		quiet      = fs.Bool("quiet", false, "do not print progress while the scenarios run")
+		genPolicy  = fs.String("generate-policy", "", "write an audit policy that fixes the findings of the run to this file")
+		policyFile = fs.String("policy", "", "the audit policy the cluster runs, extended by --generate-policy (default: policy/baseline.yaml)")
+		fixWhat    = fs.String("fix", "fail,diff,gap", "which findings --generate-policy acts on: any of fail, diff, gap")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -125,6 +129,23 @@ func runCmd(ctx context.Context, args []string) error {
 	}
 	if err := cfg.Validate(); err != nil {
 		return err
+	}
+	var current []byte
+	if *genPolicy != "" {
+		for _, f := range strings.Split(*fixWhat, ",") {
+			switch strings.ToLower(strings.TrimSpace(f)) {
+			case "fail", "diff", "gap":
+			default:
+				return fmt.Errorf("--fix: %q is not one of fail, diff, gap", f)
+			}
+		}
+		if *policyFile != "" {
+			if current, err = os.ReadFile(*policyFile); err != nil {
+				return err
+			}
+		}
+	} else if *policyFile != "" {
+		return fmt.Errorf("--policy only makes sense with --generate-policy")
 	}
 	switch *color {
 	case "always":
@@ -161,6 +182,24 @@ func runCmd(ctx context.Context, args []string) error {
 		}
 	} else {
 		runner.Report(res)
+	}
+	if *genPolicy != "" {
+		plan, err := policygen.Generate(policygen.Input{
+			Env: res.Env, Events: res.Events, Results: res.Results,
+			FetchedAt: res.FetchedAt, Scenarios: res.Scenarios, Strict: *strict,
+		}, policygen.Options{Policy: current, Fix: strings.Split(*fixWhat, ",")})
+		if err != nil {
+			return fmt.Errorf("generate a policy: %w", err)
+		}
+		if err := os.WriteFile(*genPolicy, plan.Output, 0o644); err != nil {
+			return err
+		}
+		// Keep stdout machine-readable under --json.
+		out := os.Stdout
+		if *jsonOut {
+			out = os.Stderr
+		}
+		fmt.Fprint(out, plan.Summary(*genPolicy))
 	}
 	if res.Failed() {
 		os.Exit(1)
