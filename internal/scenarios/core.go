@@ -207,6 +207,7 @@ func Scenarios(env *audit.Env) []Scenario {
 	last := base[len(base)-1]
 	out := append([]Scenario{}, base[:len(base)-1]...)
 	out = append(out, EdgeScenarios()...)
+	out = append(out, EcosystemScenarios()...)
 	out = append(out, last)
 	out = append(out, TeardownScenarios()...)
 
@@ -266,24 +267,24 @@ func baseScenarios() []Scenario {
 			Expect: func(env *audit.Env) []audit.Expect {
 				return []audit.Expect{
 					{
-						Desc: "pod create is logged with body", Requirement: ReqResources,
+						Desc: "pod create is logged at RequestResponse with body", Requirement: ReqResources,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: env.Namespace, Name: podPlain},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{env.Image},
+						Level: "RequestResponse", RequestBody: audit.Required, RequestBodyContains: []string{env.Image},
 					},
 					{
 						Desc: "pod get by a human is logged", Requirement: ReqHumans,
 						Match: audit.Match{Verb: "get", Resource: "pods", Subresource: "-", Namespace: env.Namespace, Name: podPlain},
-						Level: "Metadata", RequestBody: audit.Forbidden,
+						Level: "RequestResponse", RequestBody: audit.Forbidden,
 					},
 					{
 						Desc: "scheduler binding is Metadata only", Requirement: ReqNoise,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "binding", Namespace: env.Namespace, Name: podPlain, AnyUA: true},
-						Level: "Metadata", RequestBody: audit.Forbidden,
+						Level: "Metadata", RequestBody: audit.Forbidden, Gap: gapNoise,
 					},
 					{
 						Desc: "kubelet pods/status updates are dropped", Requirement: ReqNoise,
 						Match: audit.Match{Verbs: []string{"update", "patch"}, Resource: "pods", Subresource: "status", Namespace: env.Namespace, UserGroup: "system:nodes", AnyUA: true},
-						Level: "None",
+						Level: "None", Gap: gapNoise,
 					},
 				}
 			},
@@ -304,7 +305,7 @@ func baseScenarios() []Scenario {
 				return []audit.Expect{{
 					Desc: "privileged/hostPID/hostNetwork/hostPath pod body is visible", Requirement: ReqPrivileged,
 					Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: env.Namespace, Name: podPrivileged},
-					Level: "Request", RequestBody: audit.Required,
+					Level: "RequestResponse", RequestBody: audit.Required,
 					RequestBodyContains: []string{`"privileged":true`, `"hostPID":true`, `"hostNetwork":true`, `"hostPath"`},
 				}}
 			},
@@ -359,22 +360,22 @@ func baseScenarios() []Scenario {
 					{
 						Desc: "deployment create with body", Requirement: ReqResources,
 						Match: audit.Match{Verb: "create", Resource: "deployments", Subresource: "-", Namespace: env.Namespace, Name: deployName},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{env.Image},
+						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{env.Image}, Gap: gapNonCoreBody,
 					},
 					{
 						Desc: "deployment patch with patch body", Requirement: ReqResources,
 						Match: audit.Match{Verb: "patch", Resource: "deployments", Subresource: "-", Namespace: env.Namespace, Name: deployName},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"audit-test":"patched"`},
+						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"audit-test":"patched"`}, Gap: gapNonCoreBody,
 					},
 					{
 						Desc: "deployment scale with body", Requirement: ReqResources,
 						Match: audit.Match{Verb: "update", Resource: "deployments", Subresource: "scale", Namespace: env.Namespace, Name: deployName},
-						Level: "Request", RequestBody: audit.Required,
+						Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody,
 					},
 					{
 						Desc: "deployment delete", Requirement: ReqResources,
 						Match: audit.Match{Verb: "delete", Resource: "deployments", Subresource: "-", Namespace: env.Namespace, Name: deployName},
-						Level: "Request",
+						Level: "Metadata",
 					},
 					{
 						Desc: "replicaset created by deployment-controller is Metadata", Requirement: ReqNoise,
@@ -384,12 +385,12 @@ func baseScenarios() []Scenario {
 					{
 						Desc: "pods created by replicaset-controller are Metadata", Requirement: ReqNoise,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: env.Namespace, User: "system:serviceaccount:kube-system:replicaset-controller", AnyUA: true},
-						Level: "Metadata", RequestBody: audit.Forbidden,
+						Level: "Metadata", RequestBody: audit.Forbidden, Gap: gapNoise,
 					},
 					{
 						Desc: "deployment-controller status updates are dropped", Requirement: ReqNoise,
 						Match: audit.Match{Verbs: []string{"update", "patch"}, Resource: "deployments", Subresource: "status", Namespace: env.Namespace, AnyUA: true},
-						Level: "None",
+						Level: "None", Gap: gapNoise,
 					},
 				}
 			},
@@ -407,7 +408,7 @@ func baseScenarios() []Scenario {
 				return []audit.Expect{{
 					Desc: "pods deletecollection is logged", Requirement: ReqResources,
 					Match: audit.Match{Verb: "deletecollection", Resource: "pods", Namespace: env.Namespace},
-					Level: "Request",
+					Level: "RequestResponse",
 				}}
 			},
 		},
@@ -479,13 +480,13 @@ func baseScenarios() []Scenario {
 				ns := env.Namespace
 				return []audit.Expect{
 					{Desc: "service create", Requirement: ReqResources, Match: audit.Match{Verb: "create", Resource: "services", Namespace: ns, Name: "audit-svc"}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "ingress create", Requirement: ReqResources, Match: audit.Match{Verb: "create", Resource: "ingresses", Namespace: ns, Name: "audit-ingress"}, Level: "Request", RequestBody: audit.Required},
+					{Desc: "ingress create", Requirement: ReqResources, Match: audit.Match{Verb: "create", Resource: "ingresses", Namespace: ns, Name: "audit-ingress"}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
 					{Desc: "persistentvolumeclaim create", Requirement: ReqResources, Match: audit.Match{Verb: "create", Resource: "persistentvolumeclaims", Namespace: ns, Name: "audit-pvc"}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "networkpolicy create", Requirement: ReqResources, Match: audit.Match{Verb: "create", Resource: "networkpolicies", Group: "networking.k8s.io", Namespace: ns, Name: "audit-np"}, Level: "Request", RequestBody: audit.Required},
+					{Desc: "networkpolicy create", Requirement: ReqResources, Match: audit.Match{Verb: "create", Resource: "networkpolicies", Group: "networking.k8s.io", Namespace: ns, Name: "audit-np"}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
 					{
 						Desc: "ingress-nginx / cert-manager status updates are dropped", Requirement: ReqNoise,
 						Match: audit.Match{Verbs: []string{"update", "patch"}, Resource: "ingresses", Subresource: "status", Namespace: ns, AnyUA: true},
-						Level: "None",
+						Level: "None", Gap: gapNoise,
 					},
 				}
 			},
@@ -529,11 +530,11 @@ func baseScenarios() []Scenario {
 				return []audit.Expect{
 					{Desc: "resourcequota create", Requirement: ReqResources, Match: audit.Match{Verb: "create", Resource: "resourcequotas", Namespace: ns}, Level: "Request", RequestBody: audit.Required},
 					{Desc: "limitrange create", Requirement: ReqResources, Match: audit.Match{Verb: "create", Resource: "limitranges", Namespace: ns}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "poddisruptionbudget create", Requirement: ReqResources, Match: audit.Match{Verb: "create", Resource: "poddisruptionbudgets", Namespace: ns}, Level: "Request", RequestBody: audit.Required},
+					{Desc: "poddisruptionbudget create", Requirement: ReqResources, Match: audit.Match{Verb: "create", Resource: "poddisruptionbudgets", Namespace: ns}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
 					{
 						Desc: "resourcequota status updates (quota admission runs as system:apiserver) are dropped", Requirement: ReqNoise,
 						Match: audit.Match{Verbs: []string{"update", "patch"}, Resource: "resourcequotas", Subresource: "status", Namespace: ns, AnyUA: true},
-						Level: "None",
+						Level: "None", Gap: gapNoise,
 					},
 				}
 			},
@@ -592,9 +593,9 @@ func baseScenarios() []Scenario {
 					})
 				}
 				out = append(out, audit.Expect{
-					Desc: "secret watch logged at Metadata, ResponseComplete only", Requirement: ReqSecrets,
+					Desc: "secret watch logged at Metadata, both stages (long-running)", Requirement: ReqSecrets,
 					Match: m("watch"), Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden,
-					Stages: []string{"ResponseComplete"},
+					Stages: []string{"ResponseStarted", "ResponseComplete"},
 				})
 				return out
 			},
@@ -726,13 +727,14 @@ func baseScenarios() []Scenario {
 				g := "rbac.authorization.k8s.io"
 				return []audit.Expect{
 					{Desc: "serviceaccount create", Requirement: ReqTokens, Match: audit.Match{Verb: "create", Resource: "serviceaccounts", Subresource: "-", Namespace: ns, Name: saRestricted}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "role create", Requirement: ReqRBAC, Match: audit.Match{Verb: "create", Group: g, Resource: "roles", Namespace: ns}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "role update", Requirement: ReqRBAC, Match: audit.Match{Verb: "update", Group: g, Resource: "roles", Namespace: ns}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"create"`}},
-					{Desc: "rolebinding create", Requirement: ReqRBAC, Match: audit.Match{Verb: "create", Group: g, Resource: "rolebindings", Namespace: ns, Name: "audit-worker"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{saWorker}},
-					{Desc: "clusterrole create", Requirement: ReqRBAC, Match: audit.Match{Verb: "create", Group: g, Resource: "clusterroles", Name: crName}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "clusterrolebinding create", Requirement: ReqRBAC, Match: audit.Match{Verb: "create", Group: g, Resource: "clusterrolebindings", Name: crName}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "clusterrolebinding delete", Requirement: ReqRBAC, Match: audit.Match{Verb: "delete", Group: g, Resource: "clusterrolebindings", Name: crName}, Level: "Request"},
-					{Desc: "clusterrole delete", Requirement: ReqRBAC, Match: audit.Match{Verb: "delete", Group: g, Resource: "clusterroles", Name: crName}, Level: "Request"},
+					{Desc: "role create", Requirement: ReqRBAC, Match: audit.Match{Verb: "create", Group: g, Resource: "roles", Namespace: ns}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
+					{Desc: "role update", Requirement: ReqRBAC, Match: audit.Match{Verb: "update", Group: g, Resource: "roles", Namespace: ns}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"create"`}, Gap: gapNonCoreBody},
+					{Desc: "rolebinding create", Requirement: ReqRBAC, Match: audit.Match{Verb: "create", Group: g, Resource: "rolebindings", Namespace: ns, Name: "audit-worker"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{saWorker}, Gap: gapNonCoreBody},
+					{Desc: "clusterrole create", Requirement: ReqRBAC, Match: audit.Match{Verb: "create", Group: g, Resource: "clusterroles", Name: crName}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
+					{Desc: "clusterrolebinding create", Requirement: ReqRBAC, Match: audit.Match{Verb: "create", Group: g, Resource: "clusterrolebindings", Name: crName}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
+					{Desc: "role and rolebinding writes are logged (any level)", Requirement: ReqRBAC, Match: audit.Match{Verbs: []string{"create", "update"}, Group: g, Resources: []string{"roles", "rolebindings"}, Namespace: ns, Name: "audit-worker"}, MinEvents: 3},
+					{Desc: "clusterrolebinding delete", Requirement: ReqRBAC, Match: audit.Match{Verb: "delete", Group: g, Resource: "clusterrolebindings", Name: crName}, Level: "Metadata"},
+					{Desc: "clusterrole delete", Requirement: ReqRBAC, Match: audit.Match{Verb: "delete", Group: g, Resource: "clusterroles", Name: crName}, Level: "Metadata"},
 				}
 			},
 		},
@@ -744,9 +746,9 @@ func baseScenarios() []Scenario {
 			},
 			Expect: func(env *audit.Env) []audit.Expect {
 				return []audit.Expect{{
-					Desc: "TokenRequest logged at Metadata, token not in log", Requirement: ReqTokens,
+					Desc: "TokenRequest logged at Request; the token lives in the response, which is not recorded", Requirement: ReqTokens,
 					Match: audit.Match{Verb: "create", Resource: "serviceaccounts", Subresource: "token", Namespace: env.Namespace, Name: saRestricted},
-					Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden,
+					Level: "Request", RequestBody: audit.Required, ResponseBody: audit.Forbidden,
 				}}
 			},
 		},
@@ -814,13 +816,14 @@ func baseScenarios() []Scenario {
 				name := env.Name("csr")
 				g := "certificates.k8s.io"
 				return []audit.Expect{
-					{Desc: "CSR create logged with body", Requirement: ReqTokens, Match: audit.Match{Verb: "create", Group: g, Resource: "certificatesigningrequests", Subresource: "-", Name: name}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "CSR approval logged with body", Requirement: ReqTokens, Match: audit.Match{Verb: "update", Group: g, Resource: "certificatesigningrequests", Subresource: "approval", Name: name}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"AuditPolicyTest"}},
-					{Desc: "CSR delete logged", Requirement: ReqTokens, Match: audit.Match{Verb: "delete", Group: g, Resource: "certificatesigningrequests", Name: name}, Level: "Request"},
+					{Desc: "CSR create logged with body", Requirement: ReqTokens, Match: audit.Match{Verb: "create", Group: g, Resource: "certificatesigningrequests", Subresource: "-", Name: name}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
+					{Desc: "CSR approval logged with body", Requirement: ReqTokens, Match: audit.Match{Verb: "update", Group: g, Resource: "certificatesigningrequests", Subresource: "approval", Name: name}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"AuditPolicyTest"}, Gap: gapNonCoreBody},
+					{Desc: "CSR create and approval are logged (any level)", Requirement: ReqTokens, Match: audit.Match{Verbs: []string{"create", "update"}, Group: g, Resource: "certificatesigningrequests", Name: name}, MinEvents: 2},
+					{Desc: "CSR delete logged", Requirement: ReqTokens, Match: audit.Match{Verb: "delete", Group: g, Resource: "certificatesigningrequests", Name: name}, Level: "Metadata"},
 					{
 						Desc: "CSR signing (status update by certificate-controller) is dropped by design", Requirement: ReqNoise,
 						Match: audit.Match{Verbs: []string{"update", "patch"}, Group: g, Resource: "certificatesigningrequests", Subresource: "status", Name: name, AnyUA: true},
-						Level: "None",
+						Level: "None", Gap: gapNoise,
 					},
 				}
 			},
@@ -856,7 +859,7 @@ func baseScenarios() []Scenario {
 				forbid := map[string]string{"authorization.k8s.io/decision": "forbid"}
 				return []audit.Expect{
 					{Desc: "denied secret list by cert user is logged", Requirement: ReqAuthFail, Match: audit.Match{Verb: "list", Resource: "secrets", Namespace: env.Namespace, User: cn}, Level: "Metadata", Code: 403, Annotations: forbid},
-					{Desc: "denied pod create by cert user is logged", Requirement: ReqAuthFail, Match: audit.Match{Verb: "create", Resource: "pods", Namespace: env.Namespace, User: cn}, Level: "Request", Code: 403, Annotations: forbid},
+					{Desc: "denied pod create by cert user is logged", Requirement: ReqAuthFail, Match: audit.Match{Verb: "create", Resource: "pods", Namespace: env.Namespace, User: cn}, Level: "RequestResponse", Code: 403, Annotations: forbid},
 				}
 			},
 		},
@@ -936,16 +939,16 @@ func baseScenarios() []Scenario {
 					{
 						Desc: "SPDY exec logged with command in URI, both stages", Requirement: ReqExec,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "exec", Namespace: ns, Name: podPlain},
-						Level: "Metadata", Stages: []string{"ResponseStarted", "ResponseComplete"},
+						Level: "Request", Stages: []string{"ResponseStarted", "ResponseComplete"},
 						// requestURI carries the executed command as query parameters
 					},
 					{
 						Desc: "WebSocket exec (verb get) is logged", Requirement: ReqExec,
 						Match: audit.Match{Verb: "get", Resource: "pods", Subresource: "exec", Namespace: ns, Name: podPlain},
-						Level: "Metadata",
+						Level: "Request",
 					},
-					{Desc: "attach is logged", Requirement: ReqExec, Match: audit.Match{Resource: "pods", Subresource: "attach", Namespace: ns, Name: podPlain}, Level: "Metadata"},
-					{Desc: "portforward is logged", Requirement: ReqExec, Match: audit.Match{Resource: "pods", Subresource: "portforward", Namespace: ns, Name: podPlain}, Level: "Metadata"},
+					{Desc: "attach is logged", Requirement: ReqExec, Match: audit.Match{Resource: "pods", Subresource: "attach", Namespace: ns, Name: podPlain}, Level: "Request"},
+					{Desc: "portforward is logged", Requirement: ReqExec, Match: audit.Match{Resource: "pods", Subresource: "portforward", Namespace: ns, Name: podPlain}, Level: "Request"},
 					{Desc: "pod log read is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "get", Resource: "pods", Subresource: "log", Namespace: ns, Name: podPlain}, Level: "Metadata"},
 				}
 			},
@@ -992,9 +995,9 @@ func baseScenarios() []Scenario {
 			Expect: func(env *audit.Env) []audit.Expect {
 				ns := env.Namespace
 				return []audit.Expect{
-					{Desc: "pods/proxy is logged", Requirement: ReqExec, Match: audit.Match{Resource: "pods", Subresource: "proxy", Namespace: ns, Name: podPlain}, Level: "Metadata"},
-					{Desc: "services/proxy is logged", Requirement: ReqExec, Match: audit.Match{Resource: "services", Subresource: "proxy", Namespace: ns}, Level: "Metadata"},
-					{Desc: "nodes/proxy is logged", Requirement: ReqExec, Match: audit.Match{Resource: "nodes", Subresource: "proxy"}, Level: "Metadata"},
+					{Desc: "pods/proxy is logged", Requirement: ReqExec, Match: audit.Match{Resource: "pods", Subresource: "proxy", Namespace: ns, Name: podPlain}, Level: "Request"},
+					{Desc: "services/proxy is logged", Requirement: ReqExec, Match: audit.Match{Resource: "services", Subresource: "proxy", Namespace: ns}, Level: "Request"},
+					{Desc: "nodes/proxy is logged", Requirement: ReqExec, Match: audit.Match{Resource: "nodes", Subresource: "proxy"}, Level: "Request"},
 				}
 			},
 		},
@@ -1031,12 +1034,12 @@ func baseScenarios() []Scenario {
 					{
 						Desc: "request with --as/--as-group carries impersonatedUser", Requirement: ReqImpersonate,
 						Match: audit.Match{Verb: "list", Resource: "pods", Namespace: env.Namespace, User: env.AdminUser, ImpersonatedUser: "audit-impersonated-" + env.RunID},
-						Level: "Metadata", Impersonated: "audit-impersonated-" + env.RunID, Code: 403,
+						Level: "RequestResponse", Impersonated: "audit-impersonated-" + env.RunID, Code: 403,
 					},
 					{
 						Desc: "impersonating a kube-system SA is still logged (policy matches the real user)", Requirement: ReqImpersonate,
 						Match: audit.Match{Verb: "list", Resource: "pods", Namespace: env.Namespace, User: env.AdminUser, ImpersonatedUser: "system:serviceaccount:kube-system:default"},
-						Level: "Metadata", Impersonated: "system:serviceaccount:kube-system:default",
+						Level: "RequestResponse", Impersonated: "system:serviceaccount:kube-system:default",
 					},
 				}
 			},
@@ -1072,9 +1075,9 @@ func baseScenarios() []Scenario {
 				ns := env.Namespace
 				return []audit.Expect{
 					{Desc: "denied secret list by unprivileged SA", Requirement: ReqAuthFail, Match: audit.Match{Verb: "list", Resource: "secrets", Namespace: ns, User: user}, Level: "Metadata", Code: 403, Annotations: forbid},
-					{Desc: "denied pod list by unprivileged SA", Requirement: ReqAuthFail, Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, User: user}, Level: "Metadata", Code: 403, Annotations: forbid},
+					{Desc: "denied pod list by unprivileged SA", Requirement: ReqAuthFail, Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, User: user}, Level: "RequestResponse", Code: 403, Annotations: forbid},
 					{Desc: "denied configmap create by unprivileged SA", Requirement: ReqAuthFail, Match: audit.Match{Verb: "create", Resource: "configmaps", Namespace: ns, User: user}, Level: "Metadata", Code: 403, Annotations: forbid},
-					{Desc: "denied pod create by unprivileged SA", Requirement: ReqAuthFail, Match: audit.Match{Verb: "create", Resource: "pods", Namespace: ns, User: user}, Level: "Request", Code: 403, Annotations: forbid},
+					{Desc: "denied pod create by unprivileged SA", Requirement: ReqAuthFail, Match: audit.Match{Verb: "create", Resource: "pods", Namespace: ns, User: user}, Level: "RequestResponse", Code: 403, Annotations: forbid},
 				}
 			},
 		},
@@ -1102,12 +1105,12 @@ func baseScenarios() []Scenario {
 					{
 						Desc: "privileged pod created by a unprivileged SA (operator) is logged with body", Requirement: ReqPrivileged,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: env.Namespace, Name: podWorkerPriv, User: user},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"privileged":true`},
+						Level: "RequestResponse", RequestBody: audit.Required, RequestBodyContains: []string{`"privileged":true`},
 					},
 					{
 						Desc: "pod delete by a unprivileged SA is logged", Requirement: ReqResources,
 						Match: audit.Match{Verb: "delete", Resource: "pods", Namespace: env.Namespace, Name: podWorkerPriv, User: user},
-						Level: "Request",
+						Level: "RequestResponse",
 					},
 				}
 			},
@@ -1150,18 +1153,17 @@ func baseScenarios() []Scenario {
 					{
 						Desc: "denied pod list by a kube-system SA (e.g. stolen token)", Requirement: ReqAuthFail,
 						Match: audit.Match{Verb: "list", Resource: "pods", Namespace: env.Namespace, User: user},
-						Level: "Metadata", Code: 403, Annotations: forbid,
-						Gap: "section 3 drops all get/list/watch of managed SA groups before authz is known; denied reads by kube-system SAs are invisible",
+						Level: "RequestResponse", Code: 403, Annotations: forbid,
 					},
 					{
-						Desc: "denied secret list by a kube-system SA is logged (secrets rule precedes section 3)", Requirement: ReqAuthFail,
+						Desc: "denied secret list by a kube-system SA is logged", Requirement: ReqAuthFail,
 						Match: audit.Match{Verb: "list", Resource: "secrets", Namespace: env.Namespace, User: user},
 						Level: "Metadata", Code: 403, Annotations: forbid,
 					},
 					{
-						Desc: "denied pod create by a kube-system SA is logged (Metadata, no body)", Requirement: ReqAuthFail,
+						Desc: "denied pod create by a kube-system SA is logged", Requirement: ReqAuthFail,
 						Match: audit.Match{Verb: "create", Resource: "pods", Namespace: env.Namespace, User: user},
-						Level: "Metadata", Code: 403, Annotations: forbid,
+						Level: "RequestResponse", Code: 403, Annotations: forbid,
 					},
 					{
 						Desc: "kube-system SA create is logged with body", Requirement: ReqTokens,
@@ -1192,13 +1194,12 @@ func baseScenarios() []Scenario {
 						// Failed authentication is audited at stage ResponseStarted only.
 						Desc: "invalid bearer token (401) is logged", Requirement: ReqAuthFail,
 						Match: audit.Match{Verb: "list", Resource: "pods", Namespace: env.Namespace, ResponseCode: 401},
-						Level: "Metadata", Code: 401, UsernameEmpty: true, Stages: []string{"ResponseStarted"},
+						Level: "RequestResponse", Code: 401, UsernameEmpty: true, Stages: []string{"ResponseStarted"},
 					},
 					{
 						Desc: "invalid bearer token (401) against secrets is logged", Requirement: ReqAuthFail,
 						Match: audit.Match{Verb: "list", Resource: "secrets", Namespace: env.Namespace, ResponseCode: 401},
-						Level: "Metadata", Code: 401, UsernameEmpty: true,
-						Gap: "401s are emitted at stage ResponseStarted; the secrets rule (and the watch rule) set omitStages: [ResponseStarted], which drops failed authentication attempts against those URIs",
+						Level: "Metadata", Code: 401, UsernameEmpty: true, Stages: []string{"ResponseStarted"},
 					},
 				}
 			},
@@ -1224,11 +1225,11 @@ func baseScenarios() []Scenario {
 				return []audit.Expect{
 					{Desc: "anonymous secret list is logged", Requirement: ReqAnonymous, Match: audit.Match{Verb: "list", Resource: "secrets", Namespace: env.Namespace, User: "system:anonymous"}, Level: "Metadata"},
 					{Desc: "anonymous /api discovery is logged", Requirement: ReqAnonymous, Match: uri("/api"), Level: "Metadata"},
-					{Desc: "anonymous /healthz is dropped", Requirement: ReqNoise, Match: uri("/healthz"), Level: "None"},
-					{Desc: "anonymous /livez is dropped", Requirement: ReqNoise, Match: uri("/livez"), Level: "None"},
-					{Desc: "anonymous /readyz is dropped", Requirement: ReqNoise, Match: uri("/readyz"), Level: "None"},
-					{Desc: "anonymous /version is dropped", Requirement: ReqNoise, Match: uri("/version"), Level: "None"},
-					{Desc: "anonymous GET / (load balancer probe) is dropped", Requirement: ReqNoise, Match: audit.Match{User: "system:anonymous", NonResource: true, URI: "/", Verb: "get"}, Level: "None"},
+					{Desc: "anonymous /healthz is dropped", Requirement: ReqNoise, Match: uri("/healthz"), Level: "None", Gap: gapNoise},
+					{Desc: "anonymous /livez is dropped", Requirement: ReqNoise, Match: uri("/livez"), Level: "None", Gap: gapNoise},
+					{Desc: "anonymous /readyz is dropped", Requirement: ReqNoise, Match: uri("/readyz"), Level: "None", Gap: gapNoise},
+					{Desc: "anonymous /version is logged (the discovery drop covers system:authenticated only)", Requirement: ReqAnonymous, Match: uri("/version"), Level: "Metadata"},
+					{Desc: "anonymous GET / (load balancer probe) is dropped", Requirement: ReqNoise, Match: audit.Match{User: "system:anonymous", NonResource: true, URI: "/", Verb: "get"}, Level: "None", Gap: gapNoise},
 				}
 			},
 		},
@@ -1247,9 +1248,9 @@ func baseScenarios() []Scenario {
 				uri := func(u string) audit.Match { m := me; m.URIPrefix = u; return m }
 				return []audit.Expect{
 					{Desc: "authenticated /api discovery is dropped", Requirement: ReqNoise, Match: uri("/api"), Level: "None"},
-					{Desc: "authenticated /openapi is dropped", Requirement: ReqNoise, Match: uri("/openapi"), Level: "None"},
+					{Desc: "authenticated /openapi is dropped", Requirement: ReqNoise, Match: uri("/openapi"), Level: "None", Gap: gapNoise},
 					{Desc: "authenticated /version is dropped", Requirement: ReqNoise, Match: uri("/version"), Level: "None"},
-					{Desc: "authenticated /livez is dropped", Requirement: ReqNoise, Match: uri("/livez"), Level: "None"},
+					{Desc: "authenticated /livez is dropped", Requirement: ReqNoise, Match: uri("/livez"), Level: "None", Gap: gapNoise},
 					{Desc: "authenticated /metrics is logged", Requirement: ReqHumans, Match: uri("/metrics"), Level: "Metadata"},
 				}
 			},
@@ -1283,7 +1284,7 @@ func baseScenarios() []Scenario {
 					{
 						Desc: "kubelet nodes/status updates are dropped", Requirement: ReqNoise,
 						Match: audit.Match{Verbs: []string{"update", "patch"}, Resource: "nodes", Subresource: "status", UserGroup: "system:nodes", AnyUA: true},
-						Level: "None",
+						Level: "None", Gap: gapNoise,
 					},
 				}
 			},
@@ -1306,7 +1307,7 @@ func baseScenarios() []Scenario {
 			},
 			Expect: func(env *audit.Env) []audit.Expect {
 				return []audit.Expect{
-					{Desc: "events are dropped for everyone", Requirement: ReqNoise, Match: audit.Match{Resource: "events", Namespace: env.Namespace}, Level: "None"},
+					{Desc: "events are dropped for everyone", Requirement: ReqNoise, Match: audit.Match{Resource: "events", Namespace: env.Namespace}, Level: "None", Gap: gapNoise},
 					{Desc: "lease read by a human is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "get", Resource: "leases", Namespace: "kube-system", Name: "kube-controller-manager"}, Level: "Metadata"},
 				}
 			},
@@ -1411,10 +1412,13 @@ func baseScenarios() []Scenario {
 					{"admissionregistration.k8s.io", "mutatingwebhookconfigurations", name},
 					{"apiextensions.k8s.io", "customresourcedefinitions", "audittests." + env.Domain},
 				} {
-					out = append(out,
-						audit.Expect{Desc: r.res + " create with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: r.group, Resource: r.res, Name: r.name}, Level: "Request", RequestBody: audit.Required},
-						audit.Expect{Desc: r.res + " delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: r.group, Resource: r.res, Name: r.name}, Level: "Request"},
-					)
+					create := audit.Expect{Desc: r.res + " create with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: r.group, Resource: r.res, Name: r.name}, Level: "Request", RequestBody: audit.Required}
+					del := audit.Expect{Desc: r.res + " delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: r.group, Resource: r.res, Name: r.name}, Level: "Request"}
+					if r.group != "core" {
+						create.Gap = gapNonCoreBody
+						del.Level = "Metadata"
+					}
+					out = append(out, create, del)
 				}
 				return out
 			},
@@ -1443,7 +1447,7 @@ func baseScenarios() []Scenario {
 						Level: "Request", RequestBody: audit.Required,
 						Gap: "projectcalico.org is an aggregated API: kube-apiserver only proxies the request and cannot record the body; Request level yields Metadata-like events. Bodies would need an audit policy on calico-apiserver itself.",
 					},
-					{Desc: "calico NetworkPolicy delete logged", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: "projectcalico.org", Resource: "networkpolicies", Namespace: env.Namespace}, Level: "Request"},
+					{Desc: "calico NetworkPolicy delete logged", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: "projectcalico.org", Resource: "networkpolicies", Namespace: env.Namespace}, Level: "Metadata"},
 					{
 						Desc: "calico-apiserver persisting the CRD copy is Metadata only", Requirement: ReqNoise,
 						Match: audit.Match{Verb: "create", Group: "crd.projectcalico.org", Resource: "networkpolicies", Namespace: env.Namespace, UserGroup: "system:serviceaccounts:calico-system", AnyUA: true},
@@ -1470,8 +1474,8 @@ func baseScenarios() []Scenario {
 			},
 			Expect: func(env *audit.Env) []audit.Expect {
 				return []audit.Expect{
-					{Desc: "kubectl auth can-i (SelfSubjectAccessReview) logged with body", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Resource: "selfsubjectaccessreviews"}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "SubjectAccessReview by a human logged with body", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Resource: "subjectaccessreviews"}, Level: "Request", RequestBody: audit.Required},
+					{Desc: "kubectl auth can-i (SelfSubjectAccessReview) logged with body", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Resource: "selfsubjectaccessreviews"}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
+					{Desc: "SubjectAccessReview by a human logged with body", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Resource: "subjectaccessreviews"}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
 				}
 			},
 		},
@@ -1488,9 +1492,9 @@ func baseScenarios() []Scenario {
 			},
 			Expect: func(env *audit.Env) []audit.Expect {
 				return []audit.Expect{{
-					Desc: "human watch logged once (ResponseComplete only)", Requirement: ReqHumans,
+					Desc: "human watch logged with both stages (long-running)", Requirement: ReqHumans,
 					Match: audit.Match{Verb: "watch", Resource: "pods", Namespace: env.Namespace},
-					Level: "Metadata", Stages: []string{"ResponseComplete"},
+					Level: "RequestResponse", Stages: []string{"ResponseStarted", "ResponseComplete"},
 				}}
 			},
 		},
@@ -1545,15 +1549,13 @@ func baseScenarios() []Scenario {
 						// identity AND with the body (so privileged/hostPath is visible).
 						Desc: "privileged pod through the proxy logged with body and end-user identity", Requirement: ReqProxy,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: env.Namespace, Name: "proxy-pod", User: proxy},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"privileged":true`},
+						Level: "RequestResponse", RequestBody: audit.Required, RequestBodyContains: []string{`"privileged":true`},
 						Impersonated: env.ProxyUser, ImpersonatedGroups: env.ProxyGroups,
-						Gap: "proxy service account is in MANAGED_SA_GROUPS, so its writes match section 5 and are logged at Metadata WITHOUT body: the end-user identity is captured but the privileged spec is not. Move the clusterproxy SA out of the managed groups, or add a rule above them matching the proxy SA at Request level.",
 					},
 					{
 						Desc: "RoleBinding created through the proxy logged with body and end-user identity", Requirement: ReqProxy,
 						Match: audit.Match{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: env.Namespace, Name: "proxy-rb", User: proxy},
-						Level: "Request", RequestBody: audit.Required, Impersonated: env.ProxyUser,
-						Gap: "same as above: RBAC changes by an end user through the proxy are logged at Metadata (no rule contents) because the proxy SA is treated as a system component.",
+						Level: "Request", RequestBody: audit.Required, Impersonated: env.ProxyUser, Gap: gapNonCoreBody,
 					},
 					{
 						// The minimum the requirement asks for: whatever the level,
@@ -1595,14 +1597,12 @@ func baseScenarios() []Scenario {
 					{
 						Desc: "end-user pod list through the proxy is logged with the end-user identity", Requirement: ReqProxy,
 						Match: audit.Match{Verb: "list", Resource: "pods", Namespace: env.Namespace, User: proxy, ImpersonatedUser: env.ProxyUser},
-						Level: "Metadata",
-						Gap:   "the proxy service account's group is among the managed groups, whose get/list/watch the policy drops. Every end-user READ through the proxy then produces no audit event at all. To fix, match the proxy account above the managed-group rules.",
+						Level: "RequestResponse",
 					},
 					{
 						Desc: "end-user configmap list through the proxy is logged", Requirement: ReqProxy,
 						Match: audit.Match{Verb: "list", Resource: "configmaps", Namespace: env.Namespace, User: proxy, ImpersonatedUser: env.ProxyUser},
 						Level: "Metadata",
-						Gap:   "see above: end-user reads through the proxy are dropped by the managed-SA read filter.",
 					},
 				}
 			},
@@ -1705,12 +1705,12 @@ func baseScenarios() []Scenario {
 					{
 						Desc: "cluster-admin self-grant (ClusterRoleBinding to cluster-admin) logged with body", Requirement: ReqIncident,
 						Match: audit.Match{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: name},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"cluster-admin", "audit-attacker-" + env.RunID},
+						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"cluster-admin", "audit-attacker-" + env.RunID}, Gap: gapNonCoreBody,
 					},
 					{
 						Desc: "removal of the malicious binding is logged", Requirement: ReqIncident,
 						Match: audit.Match{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: name},
-						Level: "Request",
+						Level: "Metadata",
 					},
 				}
 			},
@@ -1742,7 +1742,7 @@ func baseScenarios() []Scenario {
 				return []audit.Expect{{
 					Desc: "denied privilege escalation attempt (403 clusterrolebinding create) is logged", Requirement: ReqIncident,
 					Match: audit.Match{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", User: user, ResponseCode: 403},
-					Level: "Request", Code: 403, Annotations: map[string]string{"authorization.k8s.io/decision": "forbid"},
+					Level: "Metadata", Code: 403, Annotations: map[string]string{"authorization.k8s.io/decision": "forbid"},
 				}}
 			},
 		},
@@ -1807,9 +1807,10 @@ func baseScenarios() []Scenario {
 				// policy matches the real (human) user and DOES log the reads,
 				// which proves the node identity is captured in impersonatedUser.
 				// A genuine rogue kubelet authenticates with its own certificate
-				// (real user in group system:nodes), whose reads section 3 drops
-				// entirely -- that drop is asserted by the global "reads by
-				// system:nodes are dropped" expectation over real kubelet traffic.
+				// (real user in group system:nodes); whether its reads are
+				// logged depends on whether the policy drops that group, which
+				// the global managed-group expectations check when the profile
+				// lists system:nodes.
 				nodes, err := env.Client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 				if err != nil || len(nodes.Items) == 0 {
 					return fmt.Errorf("list nodes: %w", err)
@@ -1848,7 +1849,7 @@ func baseScenarios() []Scenario {
 						// the global "reads by system:nodes are dropped" check.
 						Desc: "node-identity pod enumeration is attributed to the node", Requirement: ReqIncident,
 						Match: audit.Match{Verb: "list", Resource: "pods", Namespace: "", ImpersonatedUser: "system:node:" + env.RogueNode},
-						Level: "Metadata",
+						Level: "RequestResponse",
 					},
 				}
 			},
@@ -1886,7 +1887,7 @@ func baseScenarios() []Scenario {
 				return []audit.Expect{{
 					Desc: "container-breakout pod (host root + CRI socket + privileged) logged with full body", Requirement: ReqIncident,
 					Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: env.Namespace, Name: "breakout"},
-					Level: "Request", RequestBody: audit.Required,
+					Level: "RequestResponse", RequestBody: audit.Required,
 					RequestBodyContains: []string{`"privileged":true`, `"hostPID":true`, "containerd.sock", `"path":"/"`},
 				}}
 			},
@@ -1926,7 +1927,7 @@ func baseScenarios() []Scenario {
 				return []audit.Expect{{
 					Desc: "denied exec into a kube-system pod (lateral movement) is logged", Requirement: ReqIncident,
 					Match: audit.Match{Resource: "pods", Subresource: "exec", Namespace: "kube-system", User: user},
-					Level: "Metadata", Annotations: map[string]string{"authorization.k8s.io/decision": "forbid"},
+					Level: "Request", Annotations: map[string]string{"authorization.k8s.io/decision": "forbid"},
 				}}
 			},
 		},
@@ -1982,12 +1983,12 @@ func baseScenarios() []Scenario {
 					{
 						Desc: "admission webhook config create (tampering with security controls) logged with body", Requirement: ReqIncident,
 						Match: audit.Match{Verb: "create", Group: g, Resource: "validatingwebhookconfigurations", Name: name},
-						Level: "Request", RequestBody: audit.Required,
+						Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody,
 					},
 					{
 						Desc: "admission webhook config delete logged with who did it", Requirement: ReqIncident,
 						Match: audit.Match{Verb: "delete", Group: g, Resource: "validatingwebhookconfigurations", Name: name},
-						Level: "Request",
+						Level: "Metadata",
 					},
 				}
 			},
@@ -2020,24 +2021,29 @@ func GlobalExpectations(env *audit.Env) []audit.Expect {
 	out := edgeGlobalExpectations(env)
 	out = append(out, []audit.Expect{
 		{Desc: "no RequestReceived stage anywhere", Requirement: ReqHygiene, Match: audit.Match{Stage: "RequestReceived", AnyUA: true}, Level: "None"},
-		{Desc: "health endpoints never logged", Requirement: ReqNoise, Match: audit.Match{NonResource: true, URIPrefix: "/healthz", AnyUA: true}, Level: "None"},
-		{Desc: "readyz never logged", Requirement: ReqNoise, Match: audit.Match{NonResource: true, URIPrefix: "/readyz", AnyUA: true}, Level: "None"},
-		{Desc: "livez never logged", Requirement: ReqNoise, Match: audit.Match{NonResource: true, URIPrefix: "/livez", AnyUA: true}, Level: "None"},
-		{Desc: "events never logged", Requirement: ReqNoise, Match: audit.Match{Resource: "events", AnyUA: true}, Level: "None"},
+		{Desc: "health endpoints never logged", Requirement: ReqNoise, Match: audit.Match{NonResource: true, URIPrefix: "/healthz", AnyUA: true}, Level: "None", Gap: gapNoise},
+		{Desc: "readyz never logged", Requirement: ReqNoise, Match: audit.Match{NonResource: true, URIPrefix: "/readyz", AnyUA: true}, Level: "None", Gap: gapNoise},
+		{Desc: "livez never logged", Requirement: ReqNoise, Match: audit.Match{NonResource: true, URIPrefix: "/livez", AnyUA: true}, Level: "None", Gap: gapNoise},
+		{Desc: "events never logged", Requirement: ReqNoise, Match: audit.Match{Resource: "events", AnyUA: true}, Level: "None", Gap: gapNoise},
+		{Desc: "authenticated API discovery (/api*) is dropped", Requirement: ReqNoise, Match: audit.Match{NonResource: true, URIPrefix: "/api", UserGroup: "system:authenticated", AnyUA: true}, Level: "None"},
 		{Desc: "secrets never carry bodies", Requirement: ReqHygiene, Match: audit.Match{Resource: "secrets", AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden},
-		{Desc: "serviceaccounts/token never carry bodies", Requirement: ReqHygiene, Match: audit.Match{Resource: "serviceaccounts", Subresource: "token", AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden},
+		{Desc: "serviceaccounts/token never carry a response body (the issued token)", Requirement: ReqHygiene, Match: audit.Match{Resource: "serviceaccounts", Subresource: "token", AnyUA: true}, ResponseBody: audit.Forbidden, Tier: audit.Invariant},
 		{Desc: "tokenreviews never carry bodies", Requirement: ReqHygiene, Match: audit.Match{Resource: "tokenreviews", AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden, AllowNone: true},
-		{Desc: "kube-apiserver own writes (CRD status, apiservices, ipaddresses, quota status) are Metadata at most", Requirement: ReqNoise, Match: audit.Match{User: "system:apiserver", Verbs: []string{"create", "update", "patch", "delete"}, AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true},
-		{Desc: "kube-apiserver own reads are dropped", Requirement: ReqNoise, Match: audit.Match{User: "system:apiserver", Verbs: []string{"get", "list", "watch"}, AnyUA: true}, Level: "None"},
-		{Desc: "lease heartbeats by controllers are dropped", Requirement: ReqNoise, Match: audit.Match{Resource: "leases", Verbs: []string{"get", "update", "patch"}, UserPrefix: "system:kube-", AnyUA: true}, Level: "None"},
-		{Desc: "lease heartbeats by service accounts are dropped", Requirement: ReqNoise, Match: audit.Match{Resource: "leases", Verbs: []string{"get", "update", "patch"}, UserGroup: "system:serviceaccounts", AnyUA: true}, Level: "None"},
-		{Desc: "lease heartbeats by kubelets are dropped", Requirement: ReqNoise, Match: audit.Match{Resource: "leases", Verbs: []string{"get", "update", "patch"}, UserGroup: "system:nodes", AnyUA: true}, Level: "None"},
-		{Desc: "controller-manager/scheduler reads are dropped", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"get", "list", "watch"}, UserPrefix: "system:kube-", NotResources: []string{"secrets"}, AnyUA: true}, Level: "None"},
-		{Desc: "controller-manager/scheduler status writes are dropped", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"update", "patch"}, Subresource: "status", UserPrefix: "system:kube-", AnyUA: true}, Level: "None"},
+		{Desc: "kube-apiserver own writes (CRD status, apiservices, ipaddresses, quota status) are Metadata at most", Requirement: ReqNoise, Match: audit.Match{User: "system:apiserver", Verbs: []string{"create", "update", "patch", "delete"}, AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true, Gap: gapNoise},
+		{Desc: "kube-apiserver own reads are dropped", Requirement: ReqNoise, Match: audit.Match{User: "system:apiserver", Verbs: []string{"get", "list", "watch"}, AnyUA: true}, Level: "None", Gap: gapNoise},
+		{Desc: "lease heartbeats by controllers are dropped", Requirement: ReqNoise, Match: audit.Match{Resource: "leases", Verbs: []string{"get", "update", "patch"}, UserPrefix: "system:kube-", AnyUA: true}, Level: "None", Gap: gapNoise},
+		{Desc: "lease heartbeats by service accounts are dropped", Requirement: ReqNoise, Match: audit.Match{Resource: "leases", Verbs: []string{"get", "update", "patch"}, UserGroup: "system:serviceaccounts", AnyUA: true}, Level: "None", Gap: gapNoise},
+		{Desc: "lease heartbeats by kubelets are dropped", Requirement: ReqNoise, Match: audit.Match{Resource: "leases", Verbs: []string{"get", "update", "patch"}, UserGroup: "system:nodes", AnyUA: true}, Level: "None", Gap: gapNoise},
+		{Desc: "controller-manager/scheduler reads are dropped", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"get", "list", "watch"}, UserPrefix: "system:kube-", NotResources: []string{"secrets"}, AnyUA: true}, Level: "None", Gap: gapNoise},
+		{Desc: "controller-manager/scheduler status writes are dropped", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"update", "patch"}, Subresource: "status", UserPrefix: "system:kube-", AnyUA: true}, Level: "None", Gap: gapNoise},
+		{Desc: "the controller-leader configmap is never logged", Requirement: ReqNoise, Match: audit.Match{Resource: "configmaps", Name: "controller-leader", AnyUA: true}, Level: "None"},
+		{Desc: "kube-system configmaps are logged at Request by everyone", Requirement: ReqResources, Match: audit.Match{Resource: "configmaps", Namespace: "kube-system", NotUser: "system:apiserver", AnyUA: true}, Level: "Request", AllowNone: true},
 	}...)
-	// The authenticating proxy SA is intentionally logged (section 2b), so it is
-	// excluded from the "reads by its group are dropped" check; other SAs of the
-	// the proxy namespace namespace are still expected to be dropped.
+	// The baseline treats no group as the platform, so by default this adds
+	// nothing. A profile that lists managedGroups (for policy/hardened.yaml or
+	// a policy like it) gets these checks. The authenticating proxy SA is
+	// intentionally logged, so it is excluded from the "reads are dropped"
+	// check; other SAs of the proxy namespace are still expected to be dropped.
 	proxySA := env.ProxySA
 	for _, g := range env.ManagedGroups() {
 		out = append(out,
@@ -2058,5 +2064,5 @@ func GlobalExpectations(env *audit.Env) []audit.Expect {
 var RequirementOrder = []string{
 	ReqResources, ReqRBAC, ReqExec, ReqPrivileged, ReqAuthFail, ReqAnonymous, ReqImpersonate,
 	ReqTokens, ReqSecrets, ReqHumans, ReqNoise, ReqHygiene, ReqProxy, ReqIncident,
-	ReqEdge, ReqBudget,
+	ReqEdge, ReqEcosystem, ReqBudget,
 }

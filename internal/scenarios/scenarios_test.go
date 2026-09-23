@@ -88,7 +88,8 @@ func TestExpectationsAreWellFormed(t *testing.T) {
 				ex.Code == 0 && len(ex.Stages) == 0 && len(ex.Annotations) == 0 &&
 				ex.Impersonated == "" && len(ex.ImpersonatedGroups) == 0 &&
 				!ex.UsernameEmpty && !ex.NoImpersonation && ex.MinEvents == 0 &&
-				len(ex.RequestBodyContains) == 0 && len(ex.AnnotationsAbsent) == 0 {
+				len(ex.RequestBodyContains) == 0 && len(ex.AnnotationsAbsent) == 0 &&
+				len(ex.AnnotationsPresent) == 0 {
 				t.Errorf("%s/%s: expectation asserts nothing", s.Name, ex.Desc)
 			}
 			if ex.Tier != "" && ex.Tier != audit.Invariant && ex.Tier != audit.Baseline {

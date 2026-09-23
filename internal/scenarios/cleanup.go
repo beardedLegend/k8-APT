@@ -35,6 +35,7 @@ func Cleanup(ctx context.Context, env *audit.Env, try func(what string, err erro
 	crdGVR := schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
 	try("crd", env.Dynamic.Resource(crdGVR).Delete(ctx, "audittests."+env.Domain, del))
 	cleanupEdge(ctx, env, try)
+	cleanupEcosystem(ctx, env, try)
 	key := env.Label(env.RunID)
 	if nodes, err := c.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: key}); err == nil {
 		for _, n := range nodes.Items {

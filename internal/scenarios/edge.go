@@ -175,25 +175,25 @@ func EdgeScenarios() []Scenario {
 			Expect: func(env *audit.Env) []audit.Expect {
 				ns := env.Namespace
 				return []audit.Expect{
-					{Desc: "job create with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: "batch", Resource: "jobs", Subresource: "-", Namespace: ns, Name: "audit-job"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{env.Image}},
-					{Desc: "cronjob create with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: "batch", Resource: "cronjobs", Namespace: ns, Name: "audit-cronjob"}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "cronjob patch with patch body", Requirement: ReqResources, Match: audit.Match{Verb: "patch", Group: "batch", Resource: "cronjobs", Namespace: ns, Name: "audit-cronjob"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"0 0 1 1 *"}},
-					{Desc: "job delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: "batch", Resource: "jobs", Namespace: ns, Name: "audit-job"}, Level: "Request"},
-					{Desc: "cronjob delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: "batch", Resource: "cronjobs", Namespace: ns, Name: "audit-cronjob"}, Level: "Request"},
+					{Desc: "job create with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: "batch", Resource: "jobs", Subresource: "-", Namespace: ns, Name: "audit-job"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{env.Image}, Gap: gapNonCoreBody},
+					{Desc: "cronjob create with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: "batch", Resource: "cronjobs", Namespace: ns, Name: "audit-cronjob"}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
+					{Desc: "cronjob patch with patch body", Requirement: ReqResources, Match: audit.Match{Verb: "patch", Group: "batch", Resource: "cronjobs", Namespace: ns, Name: "audit-cronjob"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"0 0 1 1 *"}, Gap: gapNonCoreBody},
+					{Desc: "job delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: "batch", Resource: "jobs", Namespace: ns, Name: "audit-job"}, Level: "Metadata"},
+					{Desc: "cronjob delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: "batch", Resource: "cronjobs", Namespace: ns, Name: "audit-cronjob"}, Level: "Metadata"},
 					{
 						Desc: "pod created by the job-controller is Metadata only", Requirement: ReqNoise,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: ns, User: saUser("kube-system", "job-controller"), AnyUA: true},
-						Level: "Metadata", RequestBody: audit.Forbidden,
+						Level: "Metadata", RequestBody: audit.Forbidden, Gap: gapNoise,
 					},
 					{
 						Desc: "job-controller pod patches (tracking finalizer) are Metadata without body", Requirement: ReqNoise,
 						Match: audit.Match{Verb: "patch", Resource: "pods", Namespace: ns, User: saUser("kube-system", "job-controller"), AnyUA: true},
-						Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true,
+						Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true, Gap: gapNoise,
 					},
 					{
 						Desc: "job status updates by the job-controller are dropped", Requirement: ReqNoise,
 						Match: audit.Match{Verbs: []string{"update", "patch"}, Group: "batch", Resource: "jobs", Subresource: "status", Namespace: ns, AnyUA: true},
-						Level: "None",
+						Level: "None", Gap: gapNoise,
 					},
 				}
 			},
@@ -253,9 +253,9 @@ func EdgeScenarios() []Scenario {
 					{"autoscaling", "horizontalpodautoscalers", "audit-hpa"},
 				} {
 					out = append(out,
-						audit.Expect{Desc: r.res + " create with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: r.group, Resource: r.res, Subresource: "-", Namespace: ns, Name: r.name}, Level: "Request", RequestBody: audit.Required},
-						audit.Expect{Desc: r.res + " delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: r.group, Resource: r.res, Namespace: ns, Name: r.name}, Level: "Request"},
-						audit.Expect{Desc: r.res + " status updates by controllers are dropped", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"update", "patch"}, Group: r.group, Resource: r.res, Subresource: "status", Namespace: ns, AnyUA: true}, Level: "None"},
+						audit.Expect{Desc: r.res + " create with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: r.group, Resource: r.res, Subresource: "-", Namespace: ns, Name: r.name}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
+						audit.Expect{Desc: r.res + " delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: r.group, Resource: r.res, Namespace: ns, Name: r.name}, Level: "Metadata"},
+						audit.Expect{Desc: r.res + " status updates by controllers are dropped", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"update", "patch"}, Group: r.group, Resource: r.res, Subresource: "status", Namespace: ns, AnyUA: true}, Level: "None", Gap: gapNoise},
 					)
 				}
 				return out
@@ -299,7 +299,7 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "server-side apply of a deployment is verb patch at Request with the applied object", Requirement: ReqEdge,
 						Match: audit.Match{Verb: "patch", Group: "apps", Resource: "deployments", Namespace: ns, Name: "ssa-deploy"},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{marker, env.Image}, MinEvents: 2,
+						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{marker, env.Image}, MinEvents: 2, Gap: gapNonCoreBody,
 					},
 					{
 						Desc: "an object created through apply produces no create event", Requirement: ReqEdge,
@@ -354,19 +354,19 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "dry-run create of a privileged pod is logged with body and dryRun in the URI", Requirement: ReqEdge,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: ns, Name: "dryrun-priv"},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"privileged":true`}, Code: 201,
+						Level: "RequestResponse", RequestBody: audit.Required, RequestBodyContains: []string{`"privileged":true`}, Code: 201,
 					},
 					{
 						Desc: "dry-run create carries dryRun=All in the request URI", Requirement: ReqEdge,
 						Match: audit.Match{Verb: "create", Resource: "pods", Namespace: ns, Name: "dryrun-priv", URIContains: "dryRun=All"},
-						Level: "Request",
+						Level: "RequestResponse",
 					},
 					{
 						// client-go sends DeleteOptions in the body, so a dry-run
 						// delete is only distinguishable by its requestObject.
 						Desc: "dry-run delete is logged like a real delete; dryRun is visible only in the DeleteOptions body", Requirement: ReqEdge,
 						Match: audit.Match{Verb: "delete", Resource: "pods", Namespace: ns, Name: podPlain},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"dryRun":["All"]`},
+						Level: "RequestResponse", RequestBody: audit.Required, RequestBodyContains: []string{`"dryRun":["All"]`},
 					},
 					{
 						Desc: "dry-run secret create stays at Metadata without body", Requirement: ReqSecrets,
@@ -401,11 +401,11 @@ func EdgeScenarios() []Scenario {
 			Expect: func(env *audit.Env) []audit.Expect {
 				ns := env.Namespace
 				return []audit.Expect{
-					{Desc: "each page of a chunked list is a separate Metadata event", Requirement: ReqHumans, Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, URIContains: "limit=1"}, Level: "Metadata", MinEvents: 2},
-					{Desc: "continue token appears in the URI of the second page", Requirement: ReqEdge, Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, URIContains: "continue="}, Level: "Metadata"},
-					{Desc: "label selector list is logged with the selector in the URI", Requirement: ReqHumans, Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, URIContains: "labelSelector=audit-test"}, Level: "Metadata"},
-					{Desc: "field selector list is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, URIContains: "fieldSelector=status.phase"}, Level: "Metadata"},
-					{Desc: "cluster-wide pod list by a human is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "list", Resource: "pods", URIPrefix: "/api/v1/pods", URIContains: "limit=5"}, Level: "Metadata"},
+					{Desc: "each page of a chunked list is a separate Metadata event", Requirement: ReqHumans, Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, URIContains: "limit=1"}, Level: "RequestResponse", MinEvents: 2},
+					{Desc: "continue token appears in the URI of the second page", Requirement: ReqEdge, Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, URIContains: "continue="}, Level: "RequestResponse"},
+					{Desc: "label selector list is logged with the selector in the URI", Requirement: ReqHumans, Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, URIContains: "labelSelector=audit-test"}, Level: "RequestResponse"},
+					{Desc: "field selector list is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, URIContains: "fieldSelector=status.phase"}, Level: "RequestResponse"},
+					{Desc: "cluster-wide pod list by a human is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "list", Resource: "pods", URIPrefix: "/api/v1/pods", URIContains: "limit=5"}, Level: "RequestResponse"},
 				}
 			},
 		},
@@ -481,6 +481,7 @@ func EdgeScenarios() []Scenario {
 						Desc: "pods/status written by a human is logged at Request with body", Requirement: ReqHumans,
 						Match: audit.Match{Verb: "patch", Resource: "pods", Subresource: "status", Namespace: ns, Name: podPlain},
 						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{env.Label("Probe")},
+						Gap: "the baseline logs pods/status at Metadata for everyone, so a human forging pod status leaves no body",
 					},
 					{
 						Desc: "manual pod binding by a human (scheduler bypass) is logged at Request with the target node", Requirement: ReqHumans,
@@ -529,9 +530,9 @@ func EdgeScenarios() []Scenario {
 			},
 			Expect: func(env *audit.Env) []audit.Expect {
 				return []audit.Expect{
-					{Desc: "kubectl auth whoami (SelfSubjectReview) is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Group: "authentication.k8s.io", Resource: "selfsubjectreviews"}, Level: "Request"},
-					{Desc: "kubectl auth can-i --list (SelfSubjectRulesReview) is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Group: "authorization.k8s.io", Resource: "selfsubjectrulesreviews"}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "LocalSubjectAccessReview by a human is logged with body", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Group: "authorization.k8s.io", Resource: "localsubjectaccessreviews", Namespace: env.Namespace}, Level: "Request", RequestBody: audit.Required},
+					{Desc: "kubectl auth whoami (SelfSubjectReview) is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Group: "authentication.k8s.io", Resource: "selfsubjectreviews"}, Level: "Metadata"},
+					{Desc: "kubectl auth can-i --list (SelfSubjectRulesReview) is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Group: "authorization.k8s.io", Resource: "selfsubjectrulesreviews"}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
+					{Desc: "LocalSubjectAccessReview by a human is logged with body", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Group: "authorization.k8s.io", Resource: "localsubjectaccessreviews", Namespace: env.Namespace}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
 					{
 						Desc: "TokenReview by a human is Metadata: the reviewed token is not in the log", Requirement: ReqHygiene,
 						Match: audit.Match{Verb: "create", Group: "authentication.k8s.io", Resource: "tokenreviews"},
@@ -617,17 +618,17 @@ func EdgeScenarios() []Scenario {
 				g := "coordination.k8s.io"
 				worker := saUser(ns, saWorker)
 				return []audit.Expect{
-					{Desc: "lease create by a human is logged with body", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Group: g, Resource: "leases", Namespace: ns, Name: "human-lease"}, Level: "Request", RequestBody: audit.Required},
+					{Desc: "lease create by a human is logged with body", Requirement: ReqHumans, Match: audit.Match{Verb: "create", Group: g, Resource: "leases", Namespace: ns, Name: "human-lease"}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
 					{Desc: "lease get by a human is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "get", Group: g, Resource: "leases", Namespace: ns, Name: "human-lease"}, Level: "Metadata"},
-					{Desc: "lease update by a human is logged with body", Requirement: ReqHumans, Match: audit.Match{Verb: "update", Group: g, Resource: "leases", Namespace: ns, Name: "human-lease"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"audit-human-2"}},
-					{Desc: "lease delete by a human is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "delete", Group: g, Resource: "leases", Namespace: ns, Name: "human-lease"}, Level: "Request"},
-					{Desc: "lease create by a unprivileged SA is logged with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: g, Resource: "leases", Namespace: ns, Name: "sa-lease", User: worker}, Level: "Request", RequestBody: audit.Required},
+					{Desc: "lease update by a human is logged with body", Requirement: ReqHumans, Match: audit.Match{Verb: "update", Group: g, Resource: "leases", Namespace: ns, Name: "human-lease"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"audit-human-2"}, Gap: gapNonCoreBody},
+					{Desc: "lease delete by a human is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "delete", Group: g, Resource: "leases", Namespace: ns, Name: "human-lease"}, Level: "Metadata"},
+					{Desc: "lease create by a unprivileged SA is logged with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: g, Resource: "leases", Namespace: ns, Name: "sa-lease", User: worker}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
 					{
 						Desc: "lease heartbeats (get/update) by a unprivileged SA are dropped", Requirement: ReqNoise,
 						Match: audit.Match{Verbs: []string{"get", "update", "patch"}, Group: g, Resource: "leases", Namespace: ns, Name: "sa-lease", User: worker},
-						Level: "None",
+						Level: "None", Gap: gapNoise,
 					},
-					{Desc: "lease delete by a unprivileged SA is logged", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: g, Resource: "leases", Namespace: ns, Name: "sa-lease", User: worker}, Level: "Request"},
+					{Desc: "lease delete by a unprivileged SA is logged", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: g, Resource: "leases", Namespace: ns, Name: "sa-lease", User: worker}, Level: "Metadata"},
 				}
 			},
 		},
@@ -710,12 +711,12 @@ func EdgeScenarios() []Scenario {
 				ns := env.Namespace
 				marker := "audit-cr-" + env.RunID
 				return []audit.Expect{
-					{Desc: "CRD (with status subresource) create with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: "apiextensions.k8s.io", Resource: "customresourcedefinitions", Name: edgeCRDName(env)}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "CRD delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: "apiextensions.k8s.io", Resource: "customresourcedefinitions", Name: edgeCRDName(env)}, Level: "Request"},
-					{Desc: "custom resource create (unknown API group) with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: env.Domain, Resource: edgeCRDResource, Subresource: "-", Namespace: ns, Name: "edge-1"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{marker}},
-					{Desc: "custom resource patch with body", Requirement: ReqResources, Match: audit.Match{Verb: "patch", Group: env.Domain, Resource: edgeCRDResource, Namespace: ns, Name: "edge-1"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"patched":true`}},
-					{Desc: "custom resource status written by a human is logged with body (not dropped)", Requirement: ReqHumans, Match: audit.Match{Verb: "update", Group: env.Domain, Resource: edgeCRDResource, Subresource: "status", Namespace: ns, Name: "edge-1"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"Audited"}},
-					{Desc: "custom resource delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: env.Domain, Resource: edgeCRDResource, Namespace: ns, Name: "edge-1"}, Level: "Request"},
+					{Desc: "CRD (with status subresource) create with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: "apiextensions.k8s.io", Resource: "customresourcedefinitions", Name: edgeCRDName(env)}, Level: "Request", RequestBody: audit.Required, Gap: gapNonCoreBody},
+					{Desc: "CRD delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: "apiextensions.k8s.io", Resource: "customresourcedefinitions", Name: edgeCRDName(env)}, Level: "Metadata"},
+					{Desc: "custom resource create (unknown API group) with body", Requirement: ReqResources, Match: audit.Match{Verb: "create", Group: env.Domain, Resource: edgeCRDResource, Subresource: "-", Namespace: ns, Name: "edge-1"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{marker}, Gap: gapNonCoreBody},
+					{Desc: "custom resource patch with body", Requirement: ReqResources, Match: audit.Match{Verb: "patch", Group: env.Domain, Resource: edgeCRDResource, Namespace: ns, Name: "edge-1"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"patched":true`}, Gap: gapNonCoreBody},
+					{Desc: "custom resource status written by a human is logged with body (not dropped)", Requirement: ReqHumans, Match: audit.Match{Verb: "update", Group: env.Domain, Resource: edgeCRDResource, Subresource: "status", Namespace: ns, Name: "edge-1"}, Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"Audited"}, Gap: gapNonCoreBody},
+					{Desc: "custom resource delete", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: env.Domain, Resource: edgeCRDResource, Namespace: ns, Name: "edge-1"}, Level: "Metadata"},
 					{Desc: "custom resource get by a human is logged", Requirement: ReqHumans, Match: audit.Match{Verb: "get", Group: env.Domain, Resource: edgeCRDResource, Namespace: ns, Name: "edge-1"}, Level: "Metadata"},
 					{Desc: "denied custom resource list by a unprivileged SA is logged", Requirement: ReqAuthFail, Match: audit.Match{Verb: "list", Group: env.Domain, Resource: edgeCRDResource, Namespace: ns, User: saUser(ns, saRestricted)}, Level: "Metadata", Code: 403, Annotations: forbidAnn},
 				}
@@ -780,14 +781,14 @@ func EdgeScenarios() []Scenario {
 				ns := env.Namespace
 				ghost := "ghost-" + env.RunID
 				return []audit.Expect{
-					{Desc: "rejected pod (422 validation) is logged with the invalid body", Requirement: ReqEdge, Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: ns, Name: "invalid"}, Level: "Request", Code: 422, RequestBody: audit.Required},
-					{Desc: "undecodable body (400) is logged", Requirement: ReqEdge, Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: ns, ResponseCode: 400}, Level: "Request", Code: 400},
-					{Desc: "duplicate create (409 AlreadyExists) is logged with body", Requirement: ReqEdge, Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: ns, Name: podPlain, ResponseCode: 409}, Level: "Request", Code: 409, RequestBody: audit.Required},
-					{Desc: "stale update (409 Conflict) is logged with body", Requirement: ReqEdge, Match: audit.Match{Verb: "update", Resource: "pods", Subresource: "-", Namespace: ns, Name: podPlain, ResponseCode: 409}, Level: "Request", Code: 409, RequestBody: audit.Required, RequestBodyContains: []string{"audit-test-conflict"}},
-					{Desc: "delete of a nonexistent pod (404) is logged", Requirement: ReqEdge, Match: audit.Match{Verb: "delete", Resource: "pods", Namespace: ns, Name: ghost}, Level: "Request", Code: 404},
+					{Desc: "rejected pod (422 validation) is logged with the invalid body", Requirement: ReqEdge, Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: ns, Name: "invalid"}, Level: "RequestResponse", Code: 422, RequestBody: audit.Required},
+					{Desc: "undecodable body (400) is logged", Requirement: ReqEdge, Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: ns, ResponseCode: 400}, Level: "RequestResponse", Code: 400},
+					{Desc: "duplicate create (409 AlreadyExists) is logged with body", Requirement: ReqEdge, Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: ns, Name: podPlain, ResponseCode: 409}, Level: "RequestResponse", Code: 409, RequestBody: audit.Required},
+					{Desc: "stale update (409 Conflict) is logged with body", Requirement: ReqEdge, Match: audit.Match{Verb: "update", Resource: "pods", Subresource: "-", Namespace: ns, Name: podPlain, ResponseCode: 409}, Level: "RequestResponse", Code: 409, RequestBody: audit.Required, RequestBodyContains: []string{"audit-test-conflict"}},
+					{Desc: "delete of a nonexistent pod (404) is logged", Requirement: ReqEdge, Match: audit.Match{Verb: "delete", Resource: "pods", Namespace: ns, Name: ghost}, Level: "RequestResponse", Code: 404},
 					{Desc: "delete of a nonexistent secret (404) is logged at Metadata", Requirement: ReqSecrets, Match: audit.Match{Verb: "delete", Resource: "secrets", Namespace: ns, Name: ghost}, Level: "Metadata", Code: 404, RequestBody: audit.Forbidden},
 					{Desc: "get of a nonexistent secret (404) is logged at Metadata", Requirement: ReqSecrets, Match: audit.Match{Verb: "get", Resource: "secrets", Namespace: ns, Name: ghost}, Level: "Metadata", Code: 404},
-					{Desc: "unsupported method on a collection (PUT, 405) is logged", Requirement: ReqEdge, Match: audit.Match{Verb: "update", Resource: "pods", URI: "/api/v1/namespaces/" + ns + "/pods"}, Level: "Request", Code: 405},
+					{Desc: "unsupported method on a collection (PUT, 405) is logged", Requirement: ReqEdge, Match: audit.Match{Verb: "update", Resource: "pods", URI: "/api/v1/namespaces/" + ns + "/pods"}, Level: "RequestResponse", Code: 405},
 					{Desc: "unsupported media type (415) is logged", Requirement: ReqEdge, Match: audit.Match{Verb: "create", Resource: "configmaps", Namespace: ns, ResponseCode: 415}, Level: "Metadata", Code: 415},
 				}
 			},
@@ -819,12 +820,12 @@ func EdgeScenarios() []Scenario {
 			Expect: func(env *audit.Env) []audit.Expect {
 				nr := func(uri string) audit.Match { return audit.Match{NonResource: true, URIPrefix: uri} }
 				return []audit.Expect{
-					{Desc: "unknown core resource (404) is logged as a resource request", Requirement: ReqEdge, Match: audit.Match{Verb: "list", Group: "core", Resource: "nonexistentresources"}, Level: "Metadata", Code: 404},
+					{Desc: "unknown core resource (404) is logged as a resource request", Requirement: ReqEdge, Match: audit.Match{Verb: "list", Group: "core", Resource: "nonexistentresources"}, Level: "Request", Code: 404},
 					{Desc: "unknown API group (404) is logged as a resource request", Requirement: ReqEdge, Match: audit.Match{Verb: "list", Group: "nonexistent.example.com", Resource: "things"}, Level: "Metadata", Code: 404},
 					{Desc: "group-version discovery (/apis/apps/v1) is dropped", Requirement: ReqNoise, Match: audit.Match{NonResource: true, URI: "/apis/apps/v1"}, Level: "None"},
 					{Desc: "unknown non-resource path (/foo/bar, 404) is logged", Requirement: ReqEdge, Match: nr("/foo/bar"), Level: "Metadata", Code: 404},
 					{Desc: "wrong-case API prefix (/API/v1) is not discovery and is logged", Requirement: ReqEdge, Match: nr("/API/v1"), Level: "Metadata", Code: 404},
-					{Desc: "/openapi/v3 discovery is dropped", Requirement: ReqNoise, Match: nr("/openapi/v3"), Level: "None"},
+					{Desc: "/openapi/v3 discovery is dropped", Requirement: ReqNoise, Match: nr("/openapi/v3"), Level: "None", Gap: gapNoise},
 					{Desc: "/debug/pprof access is logged", Requirement: ReqHumans, Match: nr("/debug/pprof"), Level: "Metadata"},
 					{Desc: "/logs access is logged", Requirement: ReqHumans, Match: nr("/logs"), Level: "Metadata"},
 					{Desc: "OIDC discovery document read is logged", Requirement: ReqHumans, Match: nr("/.well-known/openid-configuration"), Level: "Metadata"},
@@ -873,7 +874,7 @@ func EdgeScenarios() []Scenario {
 					{Desc: "anonymous OIDC discovery read is logged", Requirement: ReqAnonymous, Match: anon("/.well-known"), Level: "Metadata"},
 					{Desc: "anonymous probe of an unknown path is logged", Requirement: ReqAnonymous, Match: anon("/index.html"), Level: "Metadata"},
 					{
-						Desc: "anonymous HEAD / is logged: the load-balancer probe drop covers only GET (verb head)", Requirement: ReqEdge,
+						Desc: "anonymous HEAD / is logged under verb head", Requirement: ReqEdge,
 						Match: audit.Match{User: "system:anonymous", NonResource: true, URI: "/", Verb: "head"}, Level: "Metadata",
 					},
 					{
@@ -888,7 +889,7 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "anonymous exec attempt is logged with 403", Requirement: ReqAnonymous,
 						Match: audit.Match{Resource: "pods", Subresource: "exec", Namespace: env.Namespace, Name: "ghost", User: "system:anonymous"},
-						Level: "Metadata", Code: 403, Annotations: forbidAnn,
+						Level: "Request", Code: 403, Annotations: forbidAnn,
 					},
 				}
 			},
@@ -951,7 +952,7 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "token of a deleted service account is rejected (401) and logged", Requirement: ReqAuthFail,
 						Match: audit.Match{Verb: "list", Resource: "serviceaccounts", Namespace: ns, ResponseCode: 401},
-						Level: "Metadata", Code: 401, UsernameEmpty: true, Stages: []string{"ResponseStarted"},
+						Level: "Request", Code: 401, UsernameEmpty: true, Stages: []string{"ResponseStarted"},
 					},
 					{
 						Desc: "basic auth is treated as anonymous (403, not 401) and logged", Requirement: ReqEdge,
@@ -961,18 +962,17 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "empty bearer token is treated as anonymous and logged", Requirement: ReqEdge,
 						Match: audit.Match{Verb: "list", Resource: "serviceaccounts", Namespace: ns, User: "system:anonymous"},
-						Level: "Metadata", Code: 403,
+						Level: "Request", Code: 403,
 					},
 					{
 						Desc: "impersonation attempt by an anonymous client is logged without impersonatedUser", Requirement: ReqImpersonate,
 						Match: audit.Match{Verb: "list", Resource: "nodes", User: "system:anonymous"},
-						Level: "Metadata", Code: 403, NoImpersonation: true,
+						Level: "Request", Code: 403, NoImpersonation: true,
 					},
 					{
 						Desc: "invalid bearer token on a watch (401) is logged", Requirement: ReqAuthFail,
 						Match: audit.Match{Verb: "watch", Resource: "pods", Namespace: ns, ResponseCode: 401},
-						Level: "Metadata", Code: 401, UsernameEmpty: true,
-						Gap: "401s are emitted at stage ResponseStarted; the watch rule sets omitStages: [ResponseStarted], so failed authentication on any watch is invisible",
+						Level: "RequestResponse", Code: 401, UsernameEmpty: true,
 					},
 				}
 			},
@@ -1047,7 +1047,7 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "impersonating system:anonymous is attributed to the real admin", Requirement: ReqImpersonate,
 						Match: audit.Match{Verb: "list", Resource: "serviceaccounts", Namespace: ns, ImpersonatedUser: "system:anonymous"},
-						Level: "Metadata", Impersonated: "system:anonymous", ImpersonatedGroups: []string{"system:unauthenticated"},
+						Level: "Request", Impersonated: "system:anonymous", ImpersonatedGroups: []string{"system:unauthenticated"},
 					},
 					{
 						Desc: "denied impersonation by a unprivileged SA is logged (403, no impersonatedUser, no decision annotation)", Requirement: ReqImpersonate,
@@ -1057,12 +1057,12 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "malformed impersonation headers (group without user) are logged", Requirement: ReqImpersonate,
 						Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, URIContains: "audit-malformed-impersonation"},
-						Level: "Metadata", NoImpersonation: true,
+						Level: "RequestResponse", NoImpersonation: true,
 					},
 					{
 						Desc: "write while impersonating a managed SA is logged at Request with the impersonated identity", Requirement: ReqImpersonate,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: ns, ImpersonatedUser: saUser("kube-system", "default")},
-						Level: "Request", Code: 403, Impersonated: saUser("kube-system", "default"), Annotations: forbidAnn, RequestBody: audit.Forbidden,
+						Level: "RequestResponse", Code: 403, Impersonated: saUser("kube-system", "default"), Annotations: forbidAnn, RequestBody: audit.Forbidden,
 					},
 				}
 			},
@@ -1141,18 +1141,23 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "role create within own permissions by a unprivileged SA is logged with body", Requirement: ReqRBAC,
 						Match: audit.Match{Verb: "create", Group: g, Resource: "roles", Namespace: ns, Name: "within-bounds", User: worker},
-						Level: "Request", Code: 201, RequestBody: audit.Required,
+						Level: "Request", Code: 201, RequestBody: audit.Required, Gap: gapNonCoreBody,
 					},
-					{Desc: "role delete by a unprivileged SA is logged", Requirement: ReqRBAC, Match: audit.Match{Verb: "delete", Group: g, Resource: "roles", Namespace: ns, Name: "within-bounds", User: worker}, Level: "Request"},
+					{Desc: "role delete by a unprivileged SA is logged", Requirement: ReqRBAC, Match: audit.Match{Verb: "delete", Group: g, Resource: "roles", Namespace: ns, Name: "within-bounds", User: worker}, Level: "Metadata"},
 					{
 						Desc: "RBAC escalation attempt: 403 with decision=allow and the attempted rules in the body", Requirement: ReqIncident,
 						Match: audit.Match{Verb: "create", Group: g, Resource: "roles", Namespace: ns, Name: "escalated", User: worker},
-						Level: "Request", Code: 403, Annotations: allowAnn, RequestBody: audit.Required, RequestBodyContains: []string{`"secrets"`},
+						Level: "Request", Code: 403, Annotations: allowAnn, RequestBody: audit.Required, RequestBodyContains: []string{`"secrets"`}, Gap: gapNonCoreBody,
 					},
 					{
 						Desc: "RBAC bind attempt to cluster-admin: 403 with decision=allow and the binding in the body", Requirement: ReqIncident,
 						Match: audit.Match{Verb: "create", Group: g, Resource: "rolebindings", Namespace: ns, Name: "bind-cluster-admin", User: worker},
-						Level: "Request", Code: 403, Annotations: allowAnn, RequestBody: audit.Required, RequestBodyContains: []string{"cluster-admin"},
+						Level: "Request", Code: 403, Annotations: allowAnn, RequestBody: audit.Required, RequestBodyContains: []string{"cluster-admin"}, Gap: gapNonCoreBody,
+					},
+					{
+						Desc: "RBAC escalation and bind attempts are logged with 403 and decision=allow (any level)", Requirement: ReqIncident,
+						Match: audit.Match{Verb: "create", Group: g, Namespace: ns, User: worker, ResponseCode: 403},
+						Code:  403, Annotations: allowAnn, MinEvents: 2,
 					},
 				}
 			},
@@ -1203,9 +1208,9 @@ func EdgeScenarios() []Scenario {
 				ns := env.Namespace
 				return []audit.Expect{
 					{
-						Desc: "denied TokenRequest for another account is logged at Metadata", Requirement: ReqIncident,
+						Desc: "denied TokenRequest for another account is logged", Requirement: ReqIncident,
 						Match: audit.Match{Verb: "create", Resource: "serviceaccounts", Subresource: "token", Namespace: ns, Name: saWorker, User: saUser(ns, saRestricted)},
-						Level: "Metadata", Code: 403, Annotations: forbidAnn, RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden,
+						Level: "Request", Code: 403, Annotations: forbidAnn, RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden,
 					},
 					{
 						// The token controller runs inside kube-controller-manager
@@ -1215,7 +1220,7 @@ func EdgeScenarios() []Scenario {
 						Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden,
 					},
 					{
-						Desc: "token-controller reading the legacy token secret is logged (secrets rule precedes the controller read drop)", Requirement: ReqSecrets,
+						Desc: "token-controller reading the legacy token secret is logged", Requirement: ReqSecrets,
 						Match: audit.Match{Verb: "get", Resource: "secrets", Namespace: ns, Name: "legacy-token", UserPrefix: "system:kube-", AnyUA: true},
 						Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden,
 					},
@@ -1260,22 +1265,22 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "pod referencing a secret is logged with the reference but the value never appears", Requirement: ReqResources,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: ns, Name: podSecretConsumer},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{`"secretName":"` + secretMounted + `"`, "secretKeyRef"},
+						Level: "RequestResponse", RequestBody: audit.Required, RequestBodyContains: []string{`"secretName":"` + secretMounted + `"`, "secretKeyRef"},
 					},
 					{
-						Desc: "kubelet fetching the mounted secret is logged at Metadata (secrets rule precedes the node-read drop)", Requirement: ReqSecrets,
+						Desc: "kubelet fetching the mounted secret is logged at Metadata", Requirement: ReqSecrets,
 						Match: audit.Match{Verbs: []string{"get", "list"}, Resource: "secrets", Namespace: ns, UserGroup: "system:nodes", AnyUA: true},
 						Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden,
 					},
 					{
-						Desc: "kubelet secret watches are Metadata, ResponseComplete only", Requirement: ReqSecrets,
+						Desc: "kubelet secret watches are Metadata without body", Requirement: ReqSecrets,
 						Match: audit.Match{Verb: "watch", Resource: "secrets", Namespace: ns, UserGroup: "system:nodes", AnyUA: true},
-						Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden, Stages: []string{"ResponseComplete"}, AllowNone: true,
+						Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden, AllowNone: true,
 					},
 					{
-						Desc: "kubelet TokenRequest for a pod's service account is Metadata without body", Requirement: ReqTokens,
+						Desc: "kubelet TokenRequest for a pod's service account is logged without the issued token", Requirement: ReqTokens,
 						Match: audit.Match{Verb: "create", Resource: "serviceaccounts", Subresource: "token", Namespace: ns, UserGroup: "system:nodes", AnyUA: true},
-						Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden,
+						Level: "Request", ResponseBody: audit.Forbidden,
 					},
 				}
 			},
@@ -1336,7 +1341,7 @@ func EdgeScenarios() []Scenario {
 			Expect: func(env *audit.Env) []audit.Expect {
 				ns := env.Namespace
 				return []audit.Expect{
-					{Desc: "deployments deletecollection is logged", Requirement: ReqResources, Match: audit.Match{Verb: "deletecollection", Group: "apps", Resource: "deployments", Namespace: ns}, Level: "Request"},
+					{Desc: "deployments deletecollection is logged", Requirement: ReqResources, Match: audit.Match{Verb: "deletecollection", Group: "apps", Resource: "deployments", Namespace: ns}, Level: "Metadata"},
 					{Desc: "configmaps deletecollection is logged at Metadata", Requirement: ReqResources, Match: audit.Match{Verb: "deletecollection", Resource: "configmaps", Namespace: ns}, Level: "Metadata", RequestBody: audit.Forbidden},
 					{Desc: "secrets deletecollection by an admin is logged at Metadata", Requirement: ReqSecrets, Match: audit.Match{Verb: "deletecollection", Resource: "secrets", Namespace: ns, ResponseCode: 200}, Level: "Metadata", RequestBody: audit.Forbidden, ResponseBody: audit.Forbidden},
 					{Desc: "denied secrets deletecollection by a unprivileged SA is logged", Requirement: ReqAuthFail, Match: audit.Match{Verb: "deletecollection", Resource: "secrets", Namespace: ns, User: saUser(ns, saRestricted)}, Level: "Metadata", Code: 403, Annotations: forbidAnn},
@@ -1381,10 +1386,10 @@ func EdgeScenarios() []Scenario {
 			Expect: func(env *audit.Env) []audit.Expect {
 				name := env.Name("ks")
 				return []audit.Expect{
-					{Desc: "workload created in kube-system by a human is logged with body", Requirement: ReqIncident, Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: "kube-system", Name: name}, Level: "Request", RequestBody: audit.Required},
-					{Desc: "kube-system pod delete is logged", Requirement: ReqIncident, Match: audit.Match{Verb: "delete", Resource: "pods", Namespace: "kube-system", Name: name}, Level: "Request"},
+					{Desc: "workload created in kube-system by a human is logged with body", Requirement: ReqIncident, Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: "kube-system", Name: name}, Level: "RequestResponse", RequestBody: audit.Required},
+					{Desc: "kube-system pod delete is logged", Requirement: ReqIncident, Match: audit.Match{Verb: "delete", Resource: "pods", Namespace: "kube-system", Name: name}, Level: "RequestResponse"},
 					{Desc: "secret planted in kube-system is logged at Metadata without value", Requirement: ReqSecrets, Match: audit.Match{Verbs: []string{"create", "delete"}, Resource: "secrets", Namespace: "kube-system", Name: name}, Level: "Metadata", RequestBody: audit.Forbidden, MinEvents: 2},
-					{Desc: "denied kube-system pod create by a unprivileged SA is logged (403, no body, no name)", Requirement: ReqIncident, Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: "kube-system", User: saUser(env.Namespace, saRestricted)}, Level: "Request", Code: 403, Annotations: forbidAnn, RequestBody: audit.Forbidden},
+					{Desc: "denied kube-system pod create by a unprivileged SA is logged (403, no body, no name)", Requirement: ReqIncident, Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "-", Namespace: "kube-system", User: saUser(env.Namespace, saRestricted)}, Level: "RequestResponse", Code: 403, Annotations: forbidAnn, RequestBody: audit.Forbidden},
 				}
 			},
 		},
@@ -1485,8 +1490,8 @@ func EdgeScenarios() []Scenario {
 			},
 			Expect: func(env *audit.Env) []audit.Expect {
 				return []audit.Expect{
-					{Desc: "events.k8s.io create/patch/list/delete by a human are dropped", Requirement: ReqNoise, Match: audit.Match{Group: "events.k8s.io", Resource: "events"}, Level: "None"},
-					{Desc: "denied event list by a unprivileged SA is dropped too (events are never logged)", Requirement: ReqNoise, Match: audit.Match{Resource: "events", User: saUser(env.Namespace, saRestricted)}, Level: "None"},
+					{Desc: "events.k8s.io create/patch/list/delete by a human are dropped", Requirement: ReqNoise, Match: audit.Match{Group: "events.k8s.io", Resource: "events"}, Level: "None", Gap: gapNoise},
+					{Desc: "denied event list by a unprivileged SA is dropped too (events are never logged)", Requirement: ReqNoise, Match: audit.Match{Resource: "events", User: saUser(env.Namespace, saRestricted)}, Level: "None", Gap: gapNoise},
 				}
 			},
 		},
@@ -1523,19 +1528,19 @@ func EdgeScenarios() []Scenario {
 				ns := env.Namespace
 				return []audit.Expect{
 					{
-						Desc: "denied secret watch by a unprivileged SA is logged (403, ResponseComplete only)", Requirement: ReqAuthFail,
+						Desc: "denied secret watch by a unprivileged SA is logged (403)", Requirement: ReqAuthFail,
 						Match: audit.Match{Verb: "watch", Resource: "secrets", Namespace: ns, User: saUser(ns, saRestricted)},
-						Level: "Metadata", Code: 403, Annotations: forbidAnn, Stages: []string{"ResponseComplete"},
+						Level: "Metadata", Code: 403, Annotations: forbidAnn,
 					},
 					{
-						Desc: "single-object watch (fieldSelector metadata.name) is logged once", Requirement: ReqHumans,
+						Desc: "single-object watch (fieldSelector metadata.name) is logged with both stages", Requirement: ReqHumans,
 						Match: audit.Match{Verb: "watch", Resource: "pods", Namespace: ns, URIContains: "fieldSelector=metadata.name"},
-						Level: "Metadata", Stages: []string{"ResponseComplete"},
+						Level: "RequestResponse", Stages: []string{"ResponseStarted", "ResponseComplete"},
 					},
 					{
-						Desc: "cluster-wide configmap watch by a human is logged once", Requirement: ReqHumans,
+						Desc: "cluster-wide configmap watch by a human is logged with both stages", Requirement: ReqHumans,
 						Match: audit.Match{Verb: "watch", Resource: "configmaps", URIPrefix: "/api/v1/configmaps"},
-						Level: "Metadata", Stages: []string{"ResponseComplete"},
+						Level: "Metadata", Stages: []string{"ResponseStarted", "ResponseComplete"},
 					},
 				}
 			},
@@ -1589,7 +1594,7 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "exec through the proxy is logged with the end-user identity", Requirement: ReqProxy,
 						Match: audit.Match{Verb: "create", Resource: "pods", Subresource: "exec", Namespace: ns, Name: podPlain, User: proxy},
-						Level: "Metadata", Impersonated: env.ProxyUser, ImpersonatedGroups: env.ProxyGroups,
+						Level: "Request", Impersonated: env.ProxyUser, ImpersonatedGroups: env.ProxyGroups,
 					},
 					{
 						Desc: "secret read through the proxy is logged at Metadata with the end-user identity", Requirement: ReqProxy,
@@ -1599,12 +1604,12 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "cluster-scoped read through the proxy is logged with the end-user identity", Requirement: ReqProxy,
 						Match: audit.Match{Verb: "list", Resource: "namespaces", User: proxy, ImpersonatedUser: env.ProxyUser},
-						Level: "Metadata",
+						Level: "Request",
 					},
 					{
 						Desc: "the proxy account's own reads (no impersonation) are logged", Requirement: ReqProxy,
 						Match: audit.Match{Verb: "list", Resource: "pods", Namespace: ns, User: proxy, URIContains: "audit-proxy-self"},
-						Level: "Metadata", NoImpersonation: true,
+						Level: "RequestResponse", NoImpersonation: true,
 					},
 				}
 			},
@@ -1629,8 +1634,7 @@ func EdgeScenarios() []Scenario {
 				return []audit.Expect{{
 					Desc: "denied read by another SA of the proxy namespace is logged", Requirement: ReqAuthFail,
 					Match: audit.Match{Verb: "list", Resource: "pods", Namespace: env.Namespace, User: saUser(env.ProxySANamespace(), "default")},
-					Level: "Metadata", Code: 403,
-					Gap: "section 3 drops all reads of system:serviceaccounts:" + env.ProxySANamespace() + " (only the clusterproxy SA is exempt); a stolen token of any other account in that namespace is invisible on reads",
+					Level: "RequestResponse", Code: 403,
 				}}
 			},
 		},
@@ -1658,9 +1662,9 @@ func EdgeScenarios() []Scenario {
 					{
 						Desc: "direct write to a Calico backing CRD (bypassing calico-apiserver) is logged with body", Requirement: ReqResources,
 						Match: audit.Match{Verb: "create", Group: "crd.projectcalico.org", Resource: "networksets", Namespace: env.Namespace, Name: "audit-netset"},
-						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"192.0.2.0/24"},
+						Level: "Request", RequestBody: audit.Required, RequestBodyContains: []string{"192.0.2.0/24"}, Gap: gapNonCoreBody,
 					},
-					{Desc: "direct Calico CRD delete is logged", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: "crd.projectcalico.org", Resource: "networksets", Namespace: env.Namespace, Name: "audit-netset"}, Level: "Request"},
+					{Desc: "direct Calico CRD delete is logged", Requirement: ReqResources, Match: audit.Match{Verb: "delete", Group: "crd.projectcalico.org", Resource: "networksets", Namespace: env.Namespace, Name: "audit-netset"}, Level: "Metadata"},
 				}
 			},
 		},
@@ -1691,31 +1695,27 @@ func TeardownScenarios() []Scenario {
 						Verbs: []string{"delete", "deletecollection"}, Namespace: ns, User: nsc, AnyUA: true,
 						Resources: []string{"pods", "configmaps", "endpoints", "services", "persistentvolumeclaims", "podtemplates", "replicasets", "deployments", "statefulsets", "daemonsets", "jobs", "cronjobs"},
 					},
-					Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true,
+					Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true, Gap: gapNoise,
 				},
 				{
-					// The security-relevant-writes rule outranks the rule that
-					// quietens platform accounts, so the same sweep is logged
-					// at Request for RBAC, networking and quota objects. That
-					// is the policy working as intended: it is also the reason
-					// a namespace deletion shows up as a burst of Request
-					// events by a controller nobody invoked directly.
-					Desc: "namespace-controller sweeps of security-relevant resources stay at Request", Requirement: ReqResources,
+					// RBAC and networking objects are outside the core group,
+					// so the baseline logs their sweep at Metadata.
+					Desc: "namespace-controller sweeps of RBAC and networking objects are logged", Requirement: ReqResources,
 					Match: audit.Match{
 						Verb: "deletecollection", Namespace: ns, User: nsc, AnyUA: true,
 						Groups: []string{"rbac.authorization.k8s.io", "networking.k8s.io"},
 					},
-					Level: "Request", AllowNone: true,
+					Level: "Metadata", AllowNone: true,
 				},
 				{
 					Desc: "namespace finalize by the namespace-controller is Metadata without body", Requirement: ReqNoise,
 					Match: audit.Match{Verb: "update", Resource: "namespaces", Subresource: "finalize", Name: ns, User: nsc, AnyUA: true},
-					Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true,
+					Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true, Gap: gapNoise,
 				},
 				{
 					Desc: "namespace-controller reads during teardown are dropped", Requirement: ReqNoise,
 					Match: audit.Match{Verbs: []string{"get", "list", "watch"}, User: nsc, NotResources: []string{"secrets"}, AnyUA: true},
-					Level: "None",
+					Level: "None", Gap: gapNoise,
 				},
 			}
 		},
@@ -1726,15 +1726,18 @@ func TeardownScenarios() []Scenario {
 func edgeGlobalExpectations(env *audit.Env) []audit.Expect {
 	ks := func(sa string) string { return saUser("kube-system", sa) }
 	return []audit.Expect{
-		{Desc: "no event at level RequestResponse anywhere", Requirement: ReqHygiene, Match: audit.Match{Level: "RequestResponse", AnyUA: true}, Level: "None"},
-		{Desc: "no event carries a responseObject", Requirement: ReqHygiene, Match: audit.Match{AnyUA: true}, ResponseBody: audit.Forbidden},
-		{Desc: "writes by kubelets are Metadata at most", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"create", "update", "patch", "delete"}, UserGroup: "system:nodes", AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true},
-		{Desc: "garbage collector deletes are Metadata without body", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"delete", "deletecollection", "patch", "update"}, User: ks("generic-garbage-collector"), AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true},
+		{Desc: "RequestResponse is used for pods only", Requirement: ReqHygiene, Match: audit.Match{Level: "RequestResponse", NotResources: []string{"pods"}, AnyUA: true}, Level: "None"},
+		{Desc: "only pod events carry a responseObject", Requirement: ReqHygiene, Match: audit.Match{NotResources: []string{"pods"}, AnyUA: true}, ResponseBody: audit.Forbidden},
+		{Desc: "writes by kubelets are Metadata at most", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"create", "update", "patch", "delete"}, UserGroup: "system:nodes", AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true, Gap: gapNoise},
+		{Desc: "garbage collector deletes are Metadata without body", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"delete", "deletecollection", "patch", "update"}, User: ks("generic-garbage-collector"), AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true, Gap: gapNoise},
 		{Desc: "endpointslice churn by the endpointslice-controller is Metadata without body", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"create", "update", "patch", "delete"}, Group: "discovery.k8s.io", User: ks("endpointslice-controller"), AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true},
-		{Desc: "endpoints churn by the endpoints-controller is Metadata without body", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"create", "update", "patch", "delete"}, Resource: "endpoints", UserGroup: "system:serviceaccounts:kube-system", AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true},
-		{Desc: "kube-proxy traffic is dropped", Requirement: ReqNoise, Match: audit.Match{User: ks("kube-proxy"), AnyUA: true}, Level: "None"},
-		{Desc: "cloud-controller-manager reads and heartbeats are dropped", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"get", "list", "watch"}, User: ks("cloud-controller-manager"), NotResources: []string{"secrets"}, AnyUA: true}, Level: "None"},
-		{Desc: "cert-manager reads and heartbeats are dropped", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"get", "list", "watch"}, UserGroup: "system:serviceaccounts:k8s-svc-cert-manager", NotResources: []string{"secrets"}, AnyUA: true}, Level: "None"},
+		{Desc: "endpoints churn by the endpoints-controller is Metadata without body", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"create", "update", "patch", "delete"}, Resource: "endpoints", UserGroup: "system:serviceaccounts:kube-system", AnyUA: true}, Level: "Metadata", RequestBody: audit.Forbidden, AllowNone: true, Gap: gapNoise},
+		{Desc: "kube-proxy watches of endpoints and services are dropped", Requirement: ReqNoise, Match: audit.Match{Verb: "watch", Resources: []string{"endpoints", "services"}, User: "system:kube-proxy", AnyUA: true}, Level: "None"},
+		{
+			Desc: "kube-proxy traffic is dropped", Requirement: ReqNoise, Match: audit.Match{User: ks("kube-proxy"), AnyUA: true}, Level: "None",
+			Gap: "the baseline drops watches by the user system:kube-proxy only; kubeadm's kube-proxy authenticates as the kube-system:kube-proxy service account, which no rule matches",
+		},
+		{Desc: "cloud-controller-manager reads and heartbeats are dropped", Requirement: ReqNoise, Match: audit.Match{Verbs: []string{"get", "list", "watch"}, User: ks("cloud-controller-manager"), NotResources: []string{"secrets"}, AnyUA: true}, Level: "None", Gap: gapNoise},
 	}
 }
 
